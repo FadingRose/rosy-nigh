@@ -1,0 +1,50 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# IDE and editor files
+.idea
+*.iml
+*.vscode
+
+# OS-specific files
+.DS_Store
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
+# Build directory
+bin/
+
+# Local configuration file (e.g. .env)
+.env
+
+# ai-generated commit helper file
+.diff
+
+# Optional: Ignore all files in the root except for the essential ones
+!/go.mod
+!/go.sum
+!/main.go
+!/README.md
+!/LICENSE
