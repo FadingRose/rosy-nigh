@@ -41,7 +41,7 @@ bin/
 
 # ai-generated commit helper file
 .diff
-
+diff.txt
 # Optional: Ignore all files in the root except for the essential ones
 !/go.mod
 !/go.sum
