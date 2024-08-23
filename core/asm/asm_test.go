@@ -1,7 +1,7 @@
 package asm
 
 import (
-	"fadingrose/rosy-nigh/src/core/vm"
+	"fadingrose/rosy-nigh/core/vm"
 	"reflect"
 	"testing"
 )

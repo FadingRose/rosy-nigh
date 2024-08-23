@@ -1,6 +1,6 @@
 package asm
 
-import "fadingrose/rosy-nigh/src/core/vm"
+import "fadingrose/rosy-nigh/core/vm"
 
 func DisAssembler(bs []byte) []vm.Instruction {
 	inss := make([]vm.Instruction, 0)
