@@ -14,11 +14,22 @@ A fuzz host holds these components and middleware:
 
 ## EVM Runtime Environment
 
-### StateDB 
+> Ethereum Runtime Environment: (aka ERE) The environment which is provided to an Autonomous Object executing in the EVM. Includes the EVM but also the structure of the world state on which the EVM relies for certain I/O instructions including CALL & CREATE.
 
-`StateDB` holds all the account states and storage states of the current EVM runtime environment.
+So the ERE means EVM + World State.
 
-see [StateDB interface](../core/vm/interface.go)
+### StateDB, the implementation of World State
+
+The world state is a mapping from addresses to account states, where an account state is a tuple of four items:
+1. **nonce:** a counter used to make sure each transaction can only be processed once.
+2. **balance:** the amount of ether(Wei) owned by this account.
+3. **storageRoot:** the root of the trie that encodes the storage contents of this account.
+4. **codeHash:** the hash of the EVM code of this account -- this is the code that gets executed should this account receive a message call.
+
+
+See [StateDB interface](../core/vm/interface.go)
+
+
 
 
 ## Progress
@@ -27,4 +38,3 @@ Step 0 Pre-Compile
 
 A helper tool for batch compile, see [batch-solidity-compiler](https://github.com/FadingRose/batch-compiler)
 
-// TODO accompile this
