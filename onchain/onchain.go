@@ -1,7 +1,10 @@
 package onchain
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -10,31 +13,35 @@ import (
 // See [Database interface](../core/state/database.go)
 
 type OnChainDataBase struct {
-	ChainImpls  map[Chain]ChainImpl
-	EndpointURL string
-	Client      *http.Client
-	APIKey      map[Chain]API
-	CodeCache   map[common.Hash][]byte
+	apikeys   map[Chain]APIKey
+	CodeCache map[common.Hash][]byte
 }
 
 func NewOnChainDataBase() *OnChainDataBase {
 	return &OnChainDataBase{
-		ChainImpls: make(map[Chain]ChainImpl),
-		Client:     &http.Client{},
-		APIKey:     ApiKeys(),
-		CodeCache:  make(map[common.Hash][]byte),
+		apikeys:   ApiKeys(),
+		CodeCache: make(map[common.Hash][]byte),
 	}
 }
 
 type ChainImpl interface {
-	GetCode(address string, api API) (string, error)
+	GetCode(address string, api APIKey) (string, error)
+	GetCodeSize(address string, api APIKey) (int, error)
 }
 
 func (c *OnChainDataBase) ContractCode(address common.Address, hash common.Hash) ([]byte, error) {
 	if code, ok := c.CodeCache[hash]; ok {
 		return code, nil
 	}
-	return nil, nil
+	// TODO support more chains
+	// only support ETH chain for now
+	eth := Chain(ETH)
+	data, err := eth.GetCode(address.String(), c.apikeys[eth])
+	if err != nil {
+		return nil, err
+	}
+	c.CodeCache[hash] = data
+	return data, nil
 }
 
 func (c *OnChainDataBase) ContractCodeSize(address common.Address, hash common.Hash) (int, error) {
@@ -73,6 +80,46 @@ const (
 
 func (c Chain) String() string {
 	return [...]string{"eth", "goerli", "sepolia", "bsc", "chapel", "polygon", "mumbai", "fantom", "avalanche", "optimism", "arbitrum", "gnosis", "base", "celo", "zkevm", "zkevm_testnet", "blast", "linea", "local", "iotex", "scroll"}[c]
+}
+
+func (c Chain) GetCode(address string, api APIKey) ([]byte, error) {
+	args := map[string]string{
+		"ADDRESS": address,
+		"API_KEY": api,
+	}
+	endpoint := c.endpoint(callcode, args)
+	return c.get(endpoint)
+}
+
+func (c Chain) get(endpoint string) ([]byte, error) {
+	proxyURL, err := url.Parse("http://127.0.0.1:7890")
+	if err != nil {
+		panic(err)
+	}
+
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyURL),
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   time.Second * 10,
+	}
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	type sample struct {
+		Jsonrpc string `json:"jsonrpc"`
+		Id      int    `json:"id"`
+		Result  string `json:"result"`
+	}
+	var s sample
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return nil, err
+	}
+	return []byte(s.Result), nil
 }
 
 func StringToChain(s string) Chain {
