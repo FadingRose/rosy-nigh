@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // impl Database for support of onchain fuzzing
 // See [Database interface](../core/state/database.go)
-
 type OnChainDataBase struct {
 	apikeys   map[Chain]APIKey
 	CodeCache map[common.Hash][]byte
@@ -40,6 +40,10 @@ func (c *OnChainDataBase) ContractCode(address common.Address, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
+	hasher := crypto.NewKeccakState()
+	hasher.Write(data)
+	buf := common.Hash{}
+	hasher.Read(buf[:])
 	c.CodeCache[hash] = data
 	return data, nil
 }
@@ -48,7 +52,15 @@ func (c *OnChainDataBase) ContractCodeSize(address common.Address, hash common.H
 	if code, ok := c.CodeCache[hash]; ok {
 		return len(code), nil
 	}
-	return 0, nil
+	// TODO support more chains
+	// only support ETH for now
+	eth := Chain(ETH)
+	data, err := eth.GetCode(address.String(), c.apikeys[eth])
+	if err != nil {
+		return 0, err
+	}
+	c.CodeCache[hash] = data
+	return len(data), nil
 }
 
 type Chain int
