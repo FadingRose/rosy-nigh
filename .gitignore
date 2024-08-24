@@ -50,3 +50,6 @@ diff.txt
 !/LICENSE
 docs/Ethereum Yellow Paper_ a formal specification of Ethereum, a programmable blockchain - paper.pdf
 docs/yellow_paper_md
+onchain/keys.toml
+onchain/apikey_test.go
+diff
