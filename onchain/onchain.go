@@ -41,12 +41,9 @@ func (c *OnChainDataBase) ContractCode(address common.Address, hash common.Hash)
 		return nil, err
 	}
 
-	hasher := crypto.NewKeccakState()
-	hasher.Write(data)
-	buf := common.Hash{}
-	hasher.Read(buf[:])
-
+	hash = hasher(data)
 	c.CodeCache[hash] = data
+
 	return data, nil
 }
 
@@ -59,8 +56,19 @@ func (c *OnChainDataBase) ContractCodeSize(address common.Address, hash common.H
 	if err != nil {
 		return 0, err
 	}
+
+	hash = hasher(data)
 	c.CodeCache[hash] = data
+
 	return len(data), nil
+}
+
+func hasher(data []byte) common.Hash {
+	hasher := crypto.NewKeccakState()
+	hasher.Write(data)
+	buf := common.Hash{}
+	hasher.Read(buf[:])
+	return buf
 }
 
 type Chain int

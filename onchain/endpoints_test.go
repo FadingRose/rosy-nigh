@@ -17,13 +17,13 @@ func TestEndpoints(t *testing.T) {
 				"ADDRESS": "0x123",
 				"API_KEY": "acbdef",
 			},
-			expected: "https://api.etherscan.io/api?module=proxy&action=eth_Code&address=0x123&tag=latest&apikey=acbdef",
+			expected: "https://api.etherscan.io/api?module=proxy&action=eth_getCode&address=0x123&tag=latest&apikey=acbdef",
 		},
 	}
 	for _, tc := range tcs {
-		actual := tc.Chain.endpoint(tc.remoteCall, tc.args)
+		actual := tc.endpoint(tc.remoteCall, tc.args)
 		if actual != tc.expected {
-			t.Errorf("expected %s, got %s", tc.expected, actual)
+			t.Errorf("expected %s got %s", tc.expected, actual)
 		}
 	}
 }
