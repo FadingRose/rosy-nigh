@@ -21,9 +21,9 @@ const (
 	callcode = iota
 )
 
-type remoteCallTmeplate string
+type remoteCallTemplate string
 
-func (rct remoteCallTmeplate) impl(args map[string]string) string {
+func (rct remoteCallTemplate) impl(args map[string]string) string {
 	ret := string(rct)
 	for k, v := range args {
 		ret = strings.ReplaceAll(ret, "<"+k+">", v)
@@ -31,8 +31,8 @@ func (rct remoteCallTmeplate) impl(args map[string]string) string {
 	return ret
 }
 
-func remoteCalls() map[Chain]map[remoteCall]remoteCallTmeplate {
-	return map[Chain]map[remoteCall]remoteCallTmeplate{
+func remoteCalls() map[Chain]map[remoteCall]remoteCallTemplate {
+	return map[Chain]map[remoteCall]remoteCallTemplate{
 		ETH: {
 			callcode: "?module=proxy&action=eth_getCode&address=<ADDRESS>&tag=latest&apikey=<API_KEY>",
 		},

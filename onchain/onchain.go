@@ -40,10 +40,12 @@ func (c *OnChainDataBase) ContractCode(address common.Address, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
+
 	hasher := crypto.NewKeccakState()
 	hasher.Write(data)
 	buf := common.Hash{}
 	hasher.Read(buf[:])
+
 	c.CodeCache[hash] = data
 	return data, nil
 }
@@ -52,8 +54,6 @@ func (c *OnChainDataBase) ContractCodeSize(address common.Address, hash common.H
 	if code, ok := c.CodeCache[hash]; ok {
 		return len(code), nil
 	}
-	// TODO support more chains
-	// only support ETH for now
 	eth := Chain(ETH)
 	data, err := eth.GetCode(address.String(), c.apikeys[eth])
 	if err != nil {
@@ -104,7 +104,7 @@ func (c Chain) GetCode(address string, api APIKey) ([]byte, error) {
 }
 
 func (c Chain) get(endpoint string) ([]byte, error) {
-	proxyURL, err := url.Parse("http://127.0.0.1:7890")
+	proxyURL, err := url.Parse("http://192.168.1.158:7890")
 	if err != nil {
 		panic(err)
 	}
