@@ -2,15 +2,21 @@
 
 // TODO: Write a project description
 
+For EVM execution details, see [EVM Execution Model](./evm-execution-model.md)
+
 ## Fuzz Host
 
 A fuzz host holds these components and middleware:
+- EVM Runtime Environment
 - Function Sequences & Corpus
 - Z3 Solver Adapter
 - Basic Block Coverage Tracer & CFG
 - Symbolic Interpreter, Shadow Memory Storage, and StateDB
 - Test Oracle
 - Online Fuzzing Adapter
+
+## Interpreter
+
 
 ## EVM Runtime Environment
 
@@ -26,9 +32,18 @@ The world state is a mapping from addresses to account states, where an account 
 3. **storageRoot:** the root of the trie that encodes the storage contents of this account.
 4. **codeHash:** the hash of the EVM code of this account -- this is the code that gets executed should this account receive a message call.
 
+> See [StateDB interface](../core/vm/interface.go)
 
-See [StateDB interface](../core/vm/interface.go)
+Rosy-Nigh supports on-chain fuzzing by supports StateDB with cache.
 
+> See [On-Chain DB](../onchain/onchain.go)
+
+
+# Roadmap
+
+### StateDB
+
+- [ ] Implement StateDB with tries queries
 
 
 
