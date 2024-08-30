@@ -12,7 +12,7 @@ import (
 type StateDB interface {
 	// creations
 	CreateAccount(addr common.Address)
-	CreateContract(addr common.Address, code []byte)
+	CreateContract(addr common.Address)
 
 	// world state for an Address
 	GetNonce(addr common.Address) uint64
@@ -43,4 +43,14 @@ type StateDB interface {
 	// - prepare accessList(post-berlin)
 	// - reset transient storage(eip 1153)
 	Prepare(rules params.Rules, sender, coinbase common.Address, dest *common.Address, precompiles []common.Address, txAccesses types.AccessList)
+
+	// Exist reports whether the given account exists in state.
+	// Notably this should also return true for self-destructed accounts.
+	Exist(common.Address) bool
+
+	// Snapshot
+	//
+	// WARNING: napshot not support now
+	RevertToSnapshot(int)
+	Snapshot() int
 }

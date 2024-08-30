@@ -169,3 +169,18 @@ func (s *StateDB) setError(err error) {
 		s.dbErr = err
 	}
 }
+
+// Exist reports whether the given account exists in state.
+// Notably this should also return true for self-destructed accounts.
+func (s *StateDB) Exist(addr common.Address) bool {
+	return s.getStateObject(addr) != nil
+}
+
+// TODO: Implement RevertToSnapshot
+func (s *StateDB) RevertToSnapshot(revid int) {
+}
+
+// TODO: Implement Snapshot
+func (s *StateDB) Snapshot() int {
+	return 0
+}

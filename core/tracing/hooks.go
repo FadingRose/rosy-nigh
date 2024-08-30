@@ -1,10 +1,35 @@
 package tracing
 
+import (
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/holiman/uint256"
+)
+
+// OpContext provides the context at which the opcode is being
+// executed in, including the memory, stack and various contract-level information.
+type OpContext interface {
+	MemoryData() []byte
+	StackData() []uint256.Int
+	Caller() common.Address
+	Address() common.Address
+	CallValue() *uint256.Int
+	CallInput() []byte
+}
+
+type (
+	// OpcodeHook is invoked just prior to the execution of an opcode.
+	OpcodeHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, rData []byte, depth int, err error)
+	// FaultHook is invoked when an error occurs during the execution of an opcode.
+	FaultHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, depth int, err error)
+)
+
 // GasChangeHook is invoked when the gas changes.
 type GasChangeHook = func(old, new uint64, reason GasChangeReason)
 
 type Hooks struct {
 	OnGasChange GasChangeHook
+	OnOpcode    OpcodeHook
+	OnFault     FaultHook
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful

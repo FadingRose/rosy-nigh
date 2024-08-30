@@ -45,7 +45,7 @@ Details are in the following sections.
 
 1. **Pre Check**
   1.a Check transaction `Nonce` and `EOA`, see [Tx Validity](../core/state_transition.go:199)
-  1.b Make sure that transaction gasFeeCap is greater than the baseFee (post london), see [Gas Fee Cap](../core/state_transition.go:219)
+  1.b Make sure that transaction gasFeeCap is greater than the baseFee (post London), see [Gas Fee Cap](../core/state_transition.go:219)
   1.c Check the blob version validity, see [Blob Version](../core/state_transition.go:244)
   1.d Check that the user is paying at least the current blob fee, see [Blob Fee](../core/state_transition.go:260)
 
