@@ -44,3 +44,23 @@ func (st *Stack) checkParam(offset int) *Reg {
 	}
 	return st.data[len(st.data)-offset-1]
 }
+
+func (st *Stack) push(r *Reg) {
+	// NOTE push limit (1024) is checked in baseCheck
+	st.data = append(st.data, r)
+}
+
+func (st *Stack) pop() (ret uint256.Int) {
+	ret = st.data[len(st.data)-1].Data
+	st.data = st.data[:len(st.data)-1]
+	return
+}
+
+func (st *Stack) peek() *uint256.Int {
+	return &st.data[st.len()-1].Data
+}
+
+// Back returns the n'th item in stack
+func (st *Stack) Back(n int) *uint256.Int {
+	return &st.data[st.len()-n-1].Data
+}

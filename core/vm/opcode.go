@@ -1,29 +1,90 @@
+// Copyright 2014 The go-ethereum Authors
+// This file is part of the go-ethereum library.
+//
+// The go-ethereum library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// The go-ethereum library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+
 package vm
 
-import "fmt"
+import (
+	"fmt"
+)
 
+func Disassemble(bs []byte) []Instruction {
+	var ins []Instruction
+	pc := uint64(0)
+	for pc < uint64(len(bs)) {
+		var i Instruction
+
+		b := bs[pc]
+		op := OpCode(b)
+
+		i.Op = op
+		i.PC = pc
+
+		if op.IsPush() {
+			offset := int(op - PUSH1 + 1)
+			if pc+uint64(offset)+1 >= uint64(len(bs)) {
+
+				// append zero value to avoid panic
+				trails := make([]byte, pc+uint64(offset)+1-uint64(len(bs)))
+				bs = append(bs, trails...)
+			}
+			data := bs[pc+1 : pc+uint64(offset)+1]
+			i.Val = data
+			pc += uint64(offset) + 1
+		} else {
+			pc++
+		}
+
+		ins = append(ins, i)
+	}
+
+	return ins
+}
+
+// OpCode is an EVM opcode
 type OpCode byte
+
+type (
+	Instructions []Instruction
+	Instruction  struct {
+		PC  uint64
+		Op  OpCode
+		Val []byte // Only PUSH* has a value
+		End bool   // JUMP | JUMPI | STOP | RETURN | REVERT | INVALID | SELFDESTRUCT
+	}
+)
+
+func (is *Instructions) Format() string {
+	res := ""
+	for _, i := range *is {
+		res += i.String() + "\n"
+	}
+	return res
+}
+
+func (i *Instruction) String() string {
+	if i.Op.IsPush() {
+		return fmt.Sprintf("0x%x: %s 0x%x", i.PC, i.Op, i.Val)
+	} else {
+		return fmt.Sprintf("0x%x: %s", i.PC, i.Op)
+	}
+}
 
 // IsPush specifies if an opcode is a PUSH opcode.
 func (op OpCode) IsPush() bool {
 	return PUSH0 <= op && op <= PUSH32
-}
-
-// StringToOp finds the opcode whose name is stored in `str`.
-func StringToOp(str string) OpCode {
-	return stringToOp[str]
-}
-
-func IsValidString(str string) bool {
-	_, ok := stringToOp[str]
-	return ok
-}
-
-func (op OpCode) String() string {
-	if s := opCodeToString[op]; s != "" {
-		return s
-	}
-	return fmt.Sprintf("%#x", int(op))
 }
 
 // 0x0 range - arithmetic ops.
@@ -395,6 +456,13 @@ var opCodeToString = [256]string{
 	SELFDESTRUCT: "SELFDESTRUCT",
 }
 
+func (op OpCode) String() string {
+	if s := opCodeToString[op]; s != "" {
+		return s
+	}
+	return fmt.Sprintf("%#x", int(op))
+}
+
 var stringToOp = map[string]OpCode{
 	"STOP":           STOP,
 	"ADD":            ADD,
@@ -545,4 +613,18 @@ var stringToOp = map[string]OpCode{
 	"REVERT":         REVERT,
 	"INVALID":        INVALID,
 	"SELFDESTRUCT":   SELFDESTRUCT,
+}
+
+// StringToOp finds the opcode whose name is stored in `str`.
+func StringToOp(str string) OpCode {
+	return stringToOp[str]
+}
+
+func ByteToOp(b byte) OpCode {
+	return OpCode(b)
+}
+
+func IsValidString(str string) bool {
+	_, ok := stringToOp[str]
+	return ok
 }

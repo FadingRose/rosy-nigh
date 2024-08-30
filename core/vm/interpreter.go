@@ -27,7 +27,9 @@ type EVMInterpreter struct {
 	SymbolicPool
 }
 
-// TODO: Implement this
+// DONE: Implement this
+// TEST: Test all single instructions within same contract scope
+// TEST: Test at different depth and different contract scope
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
 	// Increment the call depth which is restricted to 1024
 	in.evm.IncreaseCallStackDepth()
