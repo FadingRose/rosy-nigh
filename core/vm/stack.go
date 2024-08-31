@@ -6,18 +6,21 @@ import (
 	"github.com/holiman/uint256"
 )
 
-type Stack struct {
-	data []*Reg
-}
-
 var stackPool = sync.Pool{
 	New: func() interface{} {
-		return &Stack{data: make([]*Reg, 0, 16)}
+		return &Stack{data: make([]uint256.Int, 0, 16)}
 	},
 }
 
+// Stack is an object for basic stack operations. Items popped to the stack are
+// expected to be changed and modified. stack does not take care of adding newly
+// initialised objects.
+type Stack struct {
+	data []uint256.Int
+}
+
 func newstack() *Stack {
-	return &Stack{}
+	return stackPool.Get().(*Stack)
 }
 
 func returnStack(s *Stack) {
@@ -27,40 +30,41 @@ func returnStack(s *Stack) {
 
 // Data returns the underlying uint256.Int array.
 func (st *Stack) Data() []uint256.Int {
-	var data []uint256.Int
-	for _, reg := range st.data {
-		data = append(data, reg.Data)
-	}
-	return data
+	return st.data
+}
+
+func (st *Stack) push(d *uint256.Int) {
+	// NOTE push limit (1024) is checked in baseCheck
+	st.data = append(st.data, *d)
+}
+
+func (st *Stack) pop() (ret uint256.Int) {
+	ret = st.data[len(st.data)-1]
+	st.data = st.data[:len(st.data)-1]
+	return
 }
 
 func (st *Stack) len() int {
 	return len(st.data)
 }
 
-func (st *Stack) checkParam(offset int) *Reg {
-	if offset >= len(st.data) {
-		return nil
-	}
-	return st.data[len(st.data)-offset-1]
+func (st *Stack) swap(n int) {
+	st.data[st.len()-n], st.data[st.len()-1] = st.data[st.len()-1], st.data[st.len()-n]
 }
 
-func (st *Stack) push(r *Reg) {
-	// NOTE push limit (1024) is checked in baseCheck
-	st.data = append(st.data, r)
-}
-
-func (st *Stack) pop() (ret uint256.Int) {
-	ret = st.data[len(st.data)-1].Data
-	st.data = st.data[:len(st.data)-1]
-	return
+func (st *Stack) dup(n int) {
+	st.push(&st.data[st.len()-n])
 }
 
 func (st *Stack) peek() *uint256.Int {
-	return &st.data[st.len()-1].Data
+	return &st.data[st.len()-1]
+}
+
+func (st *Stack) peekVal() uint256.Int {
+	return st.data[st.len()-1]
 }
 
 // Back returns the n'th item in stack
 func (st *Stack) Back(n int) *uint256.Int {
-	return &st.data[st.len()-n-1].Data
+	return &st.data[st.len()-n-1]
 }

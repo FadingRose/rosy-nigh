@@ -11,7 +11,7 @@ import (
 )
 
 type SymbolicPool interface {
-	Append(pc *uint64, depth uint64, in *EVMInterpreter, ctx *ScopeContext, operation *operation) *Reg
+	Append(pc uint64, depth uint64, op OpCode, paramSize int) *Reg
 }
 
 type EVMInterpreter struct {
@@ -32,8 +32,8 @@ type EVMInterpreter struct {
 // TEST: Test at different depth and different contract scope
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
 	// Increment the call depth which is restricted to 1024
-	in.evm.IncreaseCallStackDepth()
-	defer func() { in.evm.DecreaseCallStackDepth() }()
+	in.evm.depth++
+	defer func() { in.evm.depth-- }()
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This also makes sure that the readOnly flag isn't removed for child calls.
@@ -53,7 +53,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 	var (
 		op          OpCode        // current opcode
-		mem         = newMemory() // bound memory
+		mem         = NewMemory() // bound memory
 		stack       = newstack()  // local stack
 		callContext = &ScopeContext{
 			Memory:   mem,
@@ -88,10 +88,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				return
 			}
 			if !logged && in.evm.Config.Tracer.OnOpcode != nil {
-				in.evm.Config.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.evm.GetDepth(), VMErrorFromErr(err))
+				in.evm.Config.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.evm.depth, VMErrorFromErr(err))
 			}
 			if logged && in.evm.Config.Tracer.OnFault != nil {
-				in.evm.Config.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.evm.GetDepth(), VMErrorFromErr(err))
+				in.evm.Config.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.evm.depth, VMErrorFromErr(err))
 			}
 		}()
 	}
@@ -107,7 +107,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		// EIP: 4762
-		if in.evm.GetChainRules().IsEIP4762 && !contract.IsDeployment {
+		if in.evm.chainRules.IsEIP4762 && !contract.IsDeployment {
 			// if the PC ends up in a new "chunk" of verkleized code, charge the
 			// associated costs.
 			contractAddr := contract.Address()
@@ -187,9 +187,12 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// append reg and execute the operation
 		// WARNING: This may cause we save environment data repeatedly each step, which may cause performance issues
 		// in future, try to optimize this
-		reg := in.SymbolicPool.Append(&pc, uint64(in.evm.depth), in, callContext, operation)
-		// res, err = operation.execute(&pc, in, callContext)
-		res, err = reg.execute()
+		paramSize := operation.minStack
+		reg := in.SymbolicPool.Append(pc, uint64(in.evm.depth), op, paramSize)
+		res, err = operation.execute(&pc, in, callContext)
+		// reg.Data always points to the top
+		reg.Data = stack.peekVal()
+
 		if err != nil {
 			break
 		}

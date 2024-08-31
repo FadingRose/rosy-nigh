@@ -1,6 +1,8 @@
 package tracing
 
 import (
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 )
@@ -21,6 +23,23 @@ type (
 	OpcodeHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, rData []byte, depth int, err error)
 	// FaultHook is invoked when an error occurs during the execution of an opcode.
 	FaultHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, depth int, err error)
+	// EnterHook is invoked when the processing of a message starts.
+	//
+	// Take note that EnterHook, when in the context of a live tracer, can be invoked
+	// outside of the `OnTxStart` and `OnTxEnd` hooks when dealing with system calls,
+	// see [OnSystemCallStartHook] and [OnSystemCallEndHook] for more information.
+	EnterHook = func(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int)
+	// ExitHook is invoked when the processing of a message ends.
+	// `revert` is true when there was an error during the execution.
+	// Exceptionally, before the homestead hardfork a contract creation that
+	// ran out of gas when attempting to persist the code to database did not
+	// count as a call failure and did not cause a revert of the call. This will
+	// be indicated by `reverted == false` and `err == ErrCodeStoreOutOfGas`.
+	//
+	// Take note that ExitHook, when in the context of a live tracer, can be invoked
+	// outside of the `OnTxStart` and `OnTxEnd` hooks when dealing with system calls,
+	// see [OnSystemCallStartHook] and [OnSystemCallEndHook] for more information.
+	ExitHook = func(depth int, output []byte, gasUsed uint64, err error, reverted bool)
 )
 
 // GasChangeHook is invoked when the gas changes.
@@ -30,6 +49,9 @@ type Hooks struct {
 	OnGasChange GasChangeHook
 	OnOpcode    OpcodeHook
 	OnFault     FaultHook
+
+	OnEnter EnterHook
+	OnExit  ExitHook
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful

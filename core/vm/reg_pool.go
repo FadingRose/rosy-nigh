@@ -18,12 +18,11 @@ func NewRegPool() *RegPool {
 }
 
 // Append appends a new register to the register pool.
-func (rp *RegPool) Append(pc *uint64, depth uint64, in *EVMInterpreter, ctx *ScopeContext, opration *operation) *Reg {
+func (rp *RegPool) Append(pc uint64, depth uint64, op OpCode, paramSize int) *Reg {
 	loop := rp.lookup(pc, depth)
 
-	index := [3]uint64{depth, *pc, loop}
-	reg := newReg(pc, index, in, ctx, opration)
-
+	index := [3]uint64{depth, pc, loop}
+	reg := newReg(index, op, paramSize)
 	rp.regkeyList = append(rp.regkeyList, RegKey{
 		index: index,
 		reg:   reg,
@@ -31,8 +30,8 @@ func (rp *RegPool) Append(pc *uint64, depth uint64, in *EVMInterpreter, ctx *Sco
 	return reg
 }
 
-func (rp *RegPool) lookup(pc *uint64, depth uint64) uint64 {
-	query := [2]uint64{depth, *pc}
+func (rp *RegPool) lookup(pc uint64, depth uint64) uint64 {
+	query := [2]uint64{depth, pc}
 	if loop, ok := rp.loopLookUpTable[query]; ok {
 		rp.loopLookUpTable[query] = loop + 1
 	} else {
