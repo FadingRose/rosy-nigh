@@ -2,7 +2,6 @@ package core
 
 import (
 	"fadingrose/rosy-nigh/core/tracing"
-	"fadingrose/rosy-nigh/core/types"
 	"fadingrose/rosy-nigh/core/vm"
 	"fmt"
 	"math"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	cmath "github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -23,6 +23,33 @@ type ExecutionResult struct {
 	RefundedGas  uint64 // Total gas refunded after execution
 	Err          error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	ReturnData   []byte // Returned data from evm(function result or data supplied with revert opcode)
+}
+
+// Unwrap returns the internal evm error which allows us for further
+// analysis outside.
+func (result *ExecutionResult) Unwrap() error {
+	return result.Err
+}
+
+// Failed returns the indicator whether the execution is successful or not
+func (result *ExecutionResult) Failed() bool { return result.Err != nil }
+
+// Return is a helper function to help caller distinguish between revert reason
+// and function return. Return returns the data after execution if no error occurs.
+func (result *ExecutionResult) Return() []byte {
+	if result.Err != nil {
+		return nil
+	}
+	return common.CopyBytes(result.ReturnData)
+}
+
+// Revert returns the concrete revert reason if the execution is aborted by `REVERT`
+// opcode. Note the reason can be nil if no data supplied with revert opcode.
+func (result *ExecutionResult) Revert() []byte {
+	if result.Err != vm.ErrExecutionReverted {
+		return nil
+	}
+	return common.CopyBytes(result.ReturnData)
 }
 
 // A Message contains the data derived from a single transaction that is relevant to state
@@ -45,6 +72,10 @@ type Message struct {
 	// account nonce in state. It also disables checking that the sender is an EOA.
 	// This field will be set to true for operations like RPC eth_call.
 	SkipAccountChecks bool
+}
+
+func (m *Message) String() string {
+	return fmt.Sprintf("Message: %+v", *m)
 }
 
 // TransactionToMessage converts a transaction into a Message.
@@ -72,6 +103,7 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 	return msg, err
 }
 
+// TODO: MOCK FuzzHost, run test
 // ApplyMessage computes the new state by applying the given message
 // against the old state within the environment.
 //

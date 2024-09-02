@@ -2,11 +2,12 @@ package state
 
 import (
 	"bytes"
-	"fadingrose/rosy-nigh/core/types"
+	"fadingrose/rosy-nigh/core/tracing"
 	"fmt"
 	"maps"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 )
@@ -47,6 +48,11 @@ type stateObject struct {
 	// object was previously existent and is being deployed as a contract within
 	// the current transaction.
 	newContract bool
+	// Flag whether the account was marked as self-destructed. The self-destructed
+	// account is still accessible in the scope of same transaction.
+	selfDestructed bool
+	// Cache flags.
+	dirtyCode bool // true if the code was updated
 }
 
 func newObject(db *StateDB, addr common.Address, acct *types.StateAccount) *stateObject {
@@ -165,4 +171,131 @@ func (s *stateObject) CodeHash() []byte {
 
 func (s *stateObject) Root() common.Hash {
 	return s.data.Root
+}
+
+// AddBalance adds amount to s's balance.
+// It is used to add funds to the destination account of a transfer.
+func (s *stateObject) AddBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
+	// EIP161: We must check emptiness for the objects such that the account
+	// clearing (0,0,0 objects) can take effect.
+	if amount.IsZero() {
+		if s.empty() {
+			s.touch()
+		}
+		return
+	}
+	s.SetBalance(new(uint256.Int).Add(s.Balance(), amount), reason)
+}
+
+// SubBalance removes amount from s's balance.
+// It is used to remove funds from the origin account of a transfer.
+func (s *stateObject) SubBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
+	if amount.IsZero() {
+		return
+	}
+	s.SetBalance(new(uint256.Int).Sub(s.Balance(), amount), reason)
+}
+
+func (s *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
+	s.db.journal.append(balanceChange{
+		account: &s.address,
+		prev:    new(uint256.Int).Set(s.data.Balance),
+	})
+	// TODO:Use tracer replaces this
+	// if s.db.logger != nil && s.db.logger.OnBalanceChange != nil {
+	// 	s.db.logger.OnBalanceChange(s.address, s.Balance().ToBig(), amount.ToBig(), reason)
+	// }
+	s.setBalance(amount)
+}
+
+func (s *stateObject) setBalance(amount *uint256.Int) {
+	s.data.Balance = amount
+}
+
+// empty returns whether the account is considered empty.
+func (s *stateObject) empty() bool {
+	return s.data.Nonce == 0 && s.data.Balance.IsZero() && bytes.Equal(s.data.CodeHash, types.EmptyCodeHash.Bytes())
+}
+
+func (s *stateObject) touch() {
+	s.db.journal.append(touchChange{
+		account: &s.address,
+	})
+	if s.address == ripemd {
+		// Explicitly put it in the dirty-cache, which is otherwise generated from
+		// flattened journals.
+		s.db.journal.dirty(s.address)
+	}
+}
+
+func (s *stateObject) markSelfdestructed() {
+	s.selfDestructed = true
+}
+
+func (s *stateObject) SetCode(codeHash common.Hash, code []byte) {
+	prevcode := s.Code()
+	s.db.journal.append(codeChange{
+		account:  &s.address,
+		prevhash: s.CodeHash(),
+		prevcode: prevcode,
+	})
+	// use tracer replaces this
+	// if s.db.logger != nil && s.db.logger.OnCodeChange != nil {
+	// 	s.db.logger.OnCodeChange(s.address, common.BytesToHash(s.CodeHash()), prevcode, codeHash, code)
+	// }
+	s.setCode(codeHash, code)
+}
+
+func (s *stateObject) setCode(codeHash common.Hash, code []byte) {
+	s.code = code
+	s.data.CodeHash = codeHash[:]
+	s.dirtyCode = true
+}
+
+func (s *stateObject) SetNonce(nonce uint64) {
+	s.db.journal.append(nonceChange{
+		account: &s.address,
+		prev:    s.data.Nonce,
+	})
+	// use tracer replaces this
+	// if s.db.logger != nil && s.db.logger.OnNonceChange != nil {
+	// 	s.db.logger.OnNonceChange(s.address, s.data.Nonce, nonce)
+	// }
+	s.setNonce(nonce)
+}
+
+func (s *stateObject) setNonce(nonce uint64) {
+	s.data.Nonce = nonce
+}
+
+// SetState updates a value in account storage.
+func (s *stateObject) SetState(key, value common.Hash) {
+	// If the new value is the same as old, don't set. Otherwise, track only the
+	// dirty changes, supporting reverting all of it back to no change.
+	prev, origin := s.getState(key)
+	if prev == value {
+		return
+	}
+	// New value is different, update and journal the change
+	s.db.journal.append(storageChange{
+		account:   &s.address,
+		key:       key,
+		prevvalue: prev,
+		origvalue: origin,
+	})
+	// if s.db.logger != nil && s.db.logger.OnStorageChange != nil {
+	// 	s.db.logger.OnStorageChange(s.address, key, prev, value)
+	// }
+	s.setState(key, value, origin)
+}
+
+// setState updates a value in account dirty storage. The dirtiness will be
+// removed if the value being set equals to the original value.
+func (s *stateObject) setState(key common.Hash, value common.Hash, origin common.Hash) {
+	// Storage slot is set back to its original value, undo the dirty marker
+	if value == origin {
+		delete(s.dirtyStorage, key)
+		return
+	}
+	s.dirtyStorage[key] = value
 }

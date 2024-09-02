@@ -39,3 +39,8 @@ func (rp *RegPool) lookup(pc uint64, depth uint64) uint64 {
 	}
 	return rp.loopLookUpTable[query]
 }
+
+// TODO: Implement Rebuild, it will rebuild the regkeylist to a Tree structure.
+// TEST: RegPool Verification
+func (rp *RegPool) Rebuild() {
+}

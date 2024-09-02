@@ -17,7 +17,8 @@ package core
 
 import (
 	"errors"
-	"fadingrose/rosy-nigh/core/types"
+
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 var (

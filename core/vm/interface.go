@@ -2,11 +2,10 @@ package vm
 
 import (
 	"fadingrose/rosy-nigh/core/tracing"
-	"fadingrose/rosy-nigh/core/types"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/trie/utils"
 	"github.com/holiman/uint256"
 )
 
@@ -61,7 +60,7 @@ type StateDB interface {
 	AddSlotToAccessList(addr common.Address, slot common.Hash)
 
 	// PointCache returns the point cache used in computations
-	PointCache() *utils.PointCache
+	// PointCache() *utils.PointCache
 
 	Prepare(rules params.Rules, sender, coinbase common.Address, dest *common.Address, precompiles []common.Address, txAccesses types.AccessList)
 

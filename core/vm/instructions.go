@@ -2,10 +2,10 @@ package vm
 
 import (
 	"fadingrose/rosy-nigh/core/tracing"
-	"fadingrose/rosy-nigh/core/types"
 	"math"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"

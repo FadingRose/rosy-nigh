@@ -3,12 +3,12 @@ package vm
 import (
 	"errors"
 	"fadingrose/rosy-nigh/core/tracing"
-	"fadingrose/rosy-nigh/core/types"
 	"math/big"
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -128,6 +128,33 @@ func (c *codeAndHash) Hash() common.Hash {
 		c.hash = crypto.Keccak256Hash(c.code)
 	}
 	return c.hash
+}
+
+// NewEVM returns a new EVM. The returned EVM is not thread safe and should
+// only ever be used *once*.
+func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig *params.ChainConfig, config Config) *EVM {
+	// If basefee tracking is disabled (eth_call, eth_estimateGas, etc), and no
+	// gas prices were specified, lower the basefee to 0 to avoid breaking EVM
+	// invariants (basefee < feecap)
+	if config.NoBaseFee {
+		if txCtx.GasPrice.BitLen() == 0 {
+			blockCtx.BaseFee = new(big.Int)
+		}
+		if txCtx.BlobFeeCap != nil && txCtx.BlobFeeCap.BitLen() == 0 {
+			blockCtx.BlobBaseFee = new(big.Int)
+		}
+	}
+	evm := &EVM{
+		Context:     blockCtx,
+		TxContext:   txCtx,
+		StateDB:     statedb,
+		Config:      config,
+		chainConfig: chainConfig,
+		chainRules:  chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Random != nil, blockCtx.Time),
+	}
+	evm.interpreter = *NewEVMInterpreter(evm)
+	evm.interpreter.SymbolicPool = NewRegPool()
+	return evm
 }
 
 // Create creates a new contract using code as deployment code.

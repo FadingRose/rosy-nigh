@@ -61,6 +61,9 @@ func (st *Stack) peek() *uint256.Int {
 }
 
 func (st *Stack) peekVal() uint256.Int {
+	if st.len() == 0 {
+		return uint256.Int{}
+	}
 	return st.data[st.len()-1]
 }
 
