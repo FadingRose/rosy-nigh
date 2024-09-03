@@ -26,6 +26,10 @@ type Reg struct {
 	me *Reg // 0#stack
 
 	cp *Reg // swap / dup source reg
+
+	// for JUMP / JUMPI
+	dest uint64
+	cond uint64
 }
 
 func newReg(index [3]uint64, op OpCode, paramSize int, pushbackSize int) *Reg {
@@ -144,6 +148,15 @@ func (r *Reg) setupParams(params []RegKey) {
 	if r.op.IsDup() || r.op.IsSwap() {
 		r.cp = params[0].reg
 		return
+	}
+
+	if r.op == JUMP {
+		r.dest = params[0].reg.Data.Uint64()
+	}
+
+	if r.op == JUMPI {
+		r.cond = params[0].reg.Data.Uint64()
+		r.dest = params[1].reg.Data.Uint64()
 	}
 
 	set := func(i int, reg *Reg) {

@@ -17,6 +17,22 @@ func (rk *RegKey) Instance() *Reg {
 	return rk.reg
 }
 
+func (rk *RegKey) PC() uint64 {
+	return rk.index[1]
+}
+
+func (rk *RegKey) OpCode() OpCode {
+	return rk.reg.op
+}
+
+func (rk *RegKey) Dest() uint64 {
+	return rk.reg.dest
+}
+
+func (rk *RegKey) Cond() uint64 {
+	return rk.reg.cond
+}
+
 // Duplicate supports opcode DUP
 func (rk *RegKey) Duplicate() *RegKey {
 	return &RegKey{
@@ -78,7 +94,6 @@ func (rp *RegPool) lookup(pc uint64, depth uint64) uint64 {
 // TEST: RegPool Verification
 func (rp *RegPool) rebuild() {
 	log.Debug("Rebuilding the register pool")
-	log.Debug(rp.String())
 	st := newSymbolicStack()
 	for _, rk := range rp.regkeyList {
 		// 1. read params, popN from stack
@@ -87,7 +102,7 @@ func (rp *RegPool) rebuild() {
 		// 2. read pushback
 		if rk.reg.op.IsPush() {
 			st.push(rk)
-			log.Debug(st.String())
+			// log.Debug(st.String())
 			continue
 		}
 
@@ -100,8 +115,10 @@ func (rp *RegPool) rebuild() {
 			continue
 		}
 
-		// 1.b there are two special cases
+		// 1.b there are three special cases
 		// 1.b.1 DUP
+		// 1.b.2 SWAP
+		// 1.b.3 JUMP / JUMPI do NOT push back after construct the reg
 		var params []RegKey
 
 		if rk.reg.op.IsDup() {
@@ -119,10 +136,15 @@ func (rp *RegPool) rebuild() {
 		}
 
 		rk.Instance().setupParams(params)
+
+		if rk.reg.op == JUMP || rk.reg.op == JUMPI {
+			continue
+		}
+
 		st.push(rk)
 
-		log.Debug(st.String())
 	}
+	log.Debug(rp.String())
 }
 
 // TODO: impl debug
@@ -144,9 +166,16 @@ func (rp *RegPool) Debug() {
 	}
 }
 
+// RegKeyList returns a list of RegKey with the order of the execution.
+// rebuild make sure the dependencies are correct.
+func (rp *RegPool) RegKeyList() []RegKey {
+	rp.rebuild()
+	return rp.regkeyList
+}
+
 func opWithoutPushBack(op OpCode) bool {
 	if op.IsLog() || op == CALLDATACOPY || op == CODECOPY || op == EXTCODECOPY || op == RETURNDATACOPY ||
-		op == POP || op == MSTORE || op == MSTORE8 || op == JUMP || op == JUMPI || op == JUMPDEST ||
+		op == POP || op == MSTORE || op == MSTORE8 || op == JUMPDEST ||
 		op == TSTORE || op == MCOPY || op == RETURN || op == REVERT || op == SELFDESTRUCT {
 		return true
 	}

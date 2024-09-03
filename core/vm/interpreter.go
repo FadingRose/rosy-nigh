@@ -14,6 +14,7 @@ import (
 type SymbolicPool interface {
 	Append(pc uint64, depth uint64, op OpCode, paramSize int, pushbackSize int) *Reg
 	Debug()
+	RegKeyList() []RegKey
 }
 
 type EVMInterpreter struct {

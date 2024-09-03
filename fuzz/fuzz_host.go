@@ -2,6 +2,7 @@ package fuzz
 
 import (
 	"fadingrose/rosy-nigh/abi"
+	"fadingrose/rosy-nigh/cfg"
 	"fadingrose/rosy-nigh/core"
 	"fadingrose/rosy-nigh/core/state"
 	"fadingrose/rosy-nigh/core/tracing"
@@ -37,6 +38,8 @@ type FuzzHost struct {
 
 	evm *vm.EVM // Lastest EVM instance
 
+	CFG *cfg.CFG
+
 	// Used for Reg binding
 	MethodImpl map[*abi.Method][]abi.Argument
 }
@@ -44,6 +47,7 @@ type FuzzHost struct {
 func NewFuzzHost(target *Contract, statedb *state.StateDB, blockCtx vm.BlockContext, chainConfig params.ChainConfig, config vm.Config) *FuzzHost {
 	sender := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	mutator := mutator.NewMutator(target.ABI)
+	cfg := cfg.NewCFG(target.StaticBin)
 	return &FuzzHost{
 		StateDB:      statedb,
 		BlockContext: blockCtx,
@@ -55,6 +59,8 @@ func NewFuzzHost(target *Contract, statedb *state.StateDB, blockCtx vm.BlockCont
 		Mutator: mutator,
 
 		Target: target,
+
+		CFG: cfg,
 
 		MethodImpl: make(map[*abi.Method][]abi.Argument),
 	}
@@ -76,6 +82,11 @@ func (host *FuzzHost) RunForDeploy() {
 		// 1. Generate parameters, create offset for each argument
 		// 2. Pack it into a transaction and sign it to get a Message
 		// 3. Create a new EVM and run the message
+		// 4. Success -> return, else
+		// 5. Error ->
+		//    5.a rebuild the regpool
+		//    5.b update CFG, statement coverage and branch coverage
+		//    5.c send to SMT, desire a better input / magic number
 		args, params, _ := host.Mutator.GenerateArgs(host.Target.ABI.Constructor)
 
 		offset := uint64(0x80)
@@ -110,6 +121,11 @@ func (host *FuzzHost) RunForDeploy() {
 		evm := vm.NewEVM(host.BlockContext, context, host.StateDB, &host.ChainConfig, host.EVMConfig)
 		host.evm = evm
 		result, err := core.ApplyMessage(evm, msg, &gaspool)
+
+		// update CFG
+		host.CFG.Update(host.evm.SymbolicPool.RegKeyList())
+		log.Debug(host.CFG.String())
+
 		if err != nil {
 			log.Crit("Failed: ", "err", err, "name", host.Target.Name)
 			host.Err = err
@@ -131,6 +147,7 @@ func (host *FuzzHost) RunForDeploy() {
 			log.Info("Success: ", "address", host.Target.Name)
 			break
 		}
+
 	}
 }
 
