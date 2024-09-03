@@ -62,6 +62,8 @@ func NewStateDB() *StateDB {
 		stateObjectsDestruct: make(map[common.Address]*stateObject),
 		accessList:           newAccessList(),
 		journal:              newJournal(),
+		preimages:            make(map[common.Hash][]byte),
+		logs:                 make(map[common.Hash][]*types.Log),
 	}
 }
 

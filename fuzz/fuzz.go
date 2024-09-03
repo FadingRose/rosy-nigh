@@ -5,6 +5,7 @@ import (
 	"fadingrose/rosy-nigh/core"
 	"fadingrose/rosy-nigh/core/state"
 	"fadingrose/rosy-nigh/core/vm"
+	"fadingrose/rosy-nigh/log"
 	"fmt"
 	"math/big"
 
@@ -58,7 +59,7 @@ func CreateEVMRuntimeEnironment() (statedb *state.StateDB, blockCtx vm.BlockCont
 }
 
 // Execute is the main entry point for the fuzz
-func Execute(contractFolder string) error {
+func Execute(contractFolder string, debug bool) error {
 	// Load and resolve contracts
 	contracts, err := loadContractsFromDir(contractFolder)
 	if err != nil {
@@ -71,16 +72,17 @@ func Execute(contractFolder string) error {
 		var res []*Contract
 		for _, contract := range contracts {
 			if contains(orphans, contract.Name) {
-				res = append(res, contract)
+				if len(contract.StaticBin) > 0 {
+					res = append(res, contract) // ignore interface
+				}
 			}
 		}
 		return res
 	}()
 
-	fmt.Println("Fuzzing Tasks: ", orphans)
-
+	log.Info("Fuzzing Tasks: ", "orphans", orphans)
 	for _, contract := range targets {
-		err := execute(contract)
+		err := execute(contract, debug)
 		if err != nil {
 			return fmt.Errorf("failed to execute fuzzing on contract %s: %w", contract.Name, err)
 		}
@@ -90,11 +92,16 @@ func Execute(contractFolder string) error {
 }
 
 // NOTE: Entry point for a fuzzing task
-func execute(contract *Contract) error {
-	fmt.Println("Fuzzing contract: ", contract.Name)
+func execute(contract *Contract, debug bool) error {
+	var host *FuzzHost
+	defer func() {
+		if debug {
+			host.Debug()
+		}
+	}()
 
 	statedb, blockCtx, chainConfig, config := CreateEVMRuntimeEnironment()
-	host := NewFuzzHost(contract, statedb, blockCtx, chainConfig, config)
+	host = NewFuzzHost(contract, statedb, blockCtx, chainConfig, config)
 	host.RunForDeploy()
 	return nil
 }

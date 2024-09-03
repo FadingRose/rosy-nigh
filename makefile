@@ -50,6 +50,5 @@ deps:
 # Run the application
 run: build
 	@echo "Running $(BINARY_NAME)..."
-	@$(BUILD_DIR)/$(BINARY_NAME)
-
+	@$(BUILD_DIR)/$(BINARY_NAME) --verbose --session --debug fuzz -i ./testdata/0x0addedfee0e8a65c9a60067b9fe0f24af96da51d_reentrancy/0.6.12 
 .PHONY: all build test clean deps run

@@ -87,6 +87,40 @@ func (op OpCode) IsPush() bool {
 	return PUSH0 <= op && op <= PUSH32
 }
 
+// IsDup specifies if an opcode is a DUP opcode.
+func (op OpCode) IsDup() bool {
+	return DUP1 <= op && op <= DUP16
+}
+
+func (op OpCode) DupNum() int {
+	if !op.IsDup() {
+		return 0
+	}
+	return int(op - DUP1 + 1)
+}
+
+func (op OpCode) IsSwap() bool {
+	return SWAP1 <= op && op <= SWAP16
+}
+
+func (op OpCode) SwapNum() int {
+	if !op.IsSwap() {
+		return 0
+	}
+	return int(op - SWAP1 + 1)
+}
+
+func (op OpCode) IsLog() bool {
+	return LOG0 <= op && op <= LOG4
+}
+
+func (op OpCode) LogNum() int {
+	if !op.IsLog() {
+		return -1
+	}
+	return int(op - LOG0)
+}
+
 // 0x0 range - arithmetic ops.
 const (
 	STOP       OpCode = 0x0

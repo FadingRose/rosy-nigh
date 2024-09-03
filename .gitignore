@@ -54,3 +54,8 @@ onchain/keys.toml
 onchain/apikey_test.go
 diff
 testdata/0x7cb24a53b623c0bd5e70a73377ad78330bbe17ea_reentrancy
+diffs
+divide_diff.py
+__pycache__
+testdata
+scripts

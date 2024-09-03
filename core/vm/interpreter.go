@@ -8,10 +8,12 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 type SymbolicPool interface {
-	Append(pc uint64, depth uint64, op OpCode, paramSize int) *Reg
+	Append(pc uint64, depth uint64, op OpCode, paramSize int, pushbackSize int) *Reg
+	Debug()
 }
 
 type EVMInterpreter struct {
@@ -23,8 +25,6 @@ type EVMInterpreter struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
-
-	SymbolicPool
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
@@ -238,7 +238,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// WARNING: This may cause we save environment data repeatedly each step, which may cause performance issues
 		// in future, try to optimize this
 		paramSize := operation.minStack
-		reg := in.SymbolicPool.Append(pc, uint64(in.evm.depth), op, paramSize)
+		pushbackSize := int(params.StackLimit) + paramSize - operation.maxStack
+		reg := in.evm.SymbolicPool.Append(pc, uint64(in.evm.depth), op, paramSize, pushbackSize)
 		res, err = operation.execute(&pc, in, callContext)
 		// reg.Data always points to the top
 		reg.Data = stack.peekVal()

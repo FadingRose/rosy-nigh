@@ -102,6 +102,8 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+
+	SymbolicPool
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -153,7 +155,7 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig
 		chainRules:  chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Random != nil, blockCtx.Time),
 	}
 	evm.interpreter = *NewEVMInterpreter(evm)
-	evm.interpreter.SymbolicPool = NewRegPool()
+	evm.SymbolicPool = NewRegPool()
 	return evm
 }
 
