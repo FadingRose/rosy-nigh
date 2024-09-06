@@ -60,6 +60,14 @@ func (it *instructionIterator) Next() bool {
 	return true
 }
 
+func (it *instructionIterator) ToStop() {
+	for it.Next() {
+		if it.op == vm.STOP {
+			break
+		}
+	}
+}
+
 // Error returns any error that may have been encountered.
 func (it *instructionIterator) Error() error {
 	return it.error

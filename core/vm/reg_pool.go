@@ -33,6 +33,18 @@ func (rk *RegKey) Cond() uint64 {
 	return rk.reg.cond
 }
 
+func (rk *RegKey) Offset() uint64 {
+	return rk.reg.offset
+}
+
+func (rk *RegKey) Relies() []RegKey {
+	return rk.Instance().Relies()
+}
+
+func (rk *RegKey) Expand() string {
+	return rk.Instance().Expand()
+}
+
 // Duplicate supports opcode DUP
 func (rk *RegKey) Duplicate() *RegKey {
 	return &RegKey{
@@ -43,6 +55,10 @@ func (rk *RegKey) Duplicate() *RegKey {
 
 func (rk *RegKey) String() string {
 	return rk.reg.String()
+}
+
+func (rk *RegKey) IndexString() string {
+	return fmt.Sprintf("[%d,%d,%d]", rk.index[0], rk.index[1], rk.index[2])
 }
 
 type RegPool struct {
@@ -73,10 +89,12 @@ func (rp *RegPool) Append(pc uint64, depth uint64, op OpCode, paramSize int, pus
 
 	index := [3]uint64{depth, pc, loop}
 	reg := newReg(index, op, paramSize, pushbackSize)
-	rp.regkeyList = append(rp.regkeyList, RegKey{
+	rk := RegKey{
 		index: index,
 		reg:   reg,
-	})
+	}
+	// reg.regkey = rk
+	rp.regkeyList = append(rp.regkeyList, rk)
 	return reg
 }
 
@@ -93,9 +111,10 @@ func (rp *RegPool) lookup(pc uint64, depth uint64) uint64 {
 // TODO: Implement Rebuild, it will rebuild the regkeylist to a Tree structure.
 // TEST: RegPool Verification
 func (rp *RegPool) rebuild() {
-	log.Debug("Rebuilding the register pool")
+	log.Debug(fmt.Sprintf("Rebuilding reg pool, len: %d", len(rp.regkeyList)))
 	st := newSymbolicStack()
 	for _, rk := range rp.regkeyList {
+		log.Debug(fmt.Sprintf("stack %s", st.String()))
 		// 1. read params, popN from stack
 		//     1.a params = 0, skip 1.
 		//     1.b params > 0, popN(params), then setup the reg's L, M ...
@@ -111,10 +130,6 @@ func (rp *RegPool) rebuild() {
 			continue
 		}
 
-		if opWithoutPushBack(rk.reg.op) {
-			continue
-		}
-
 		// 1.b there are three special cases
 		// 1.b.1 DUP
 		// 1.b.2 SWAP
@@ -122,6 +137,7 @@ func (rp *RegPool) rebuild() {
 		var params []RegKey
 
 		if rk.reg.op.IsDup() {
+			// in DupN, the result is already push back
 			st.DupN(rk.reg.op.DupNum())
 			params = append(params, st.Peek())
 		} else if rk.reg.op.IsSwap() {
@@ -137,7 +153,11 @@ func (rp *RegPool) rebuild() {
 
 		rk.Instance().setupParams(params)
 
-		if rk.reg.op == JUMP || rk.reg.op == JUMPI {
+		if rk.reg.op == JUMP || rk.reg.op == JUMPI || rk.reg.op.IsDup() || rk.reg.op.IsSwap() {
+			continue
+		}
+
+		if opWithoutPushBack(rk.reg.op) {
 			continue
 		}
 
@@ -239,9 +259,18 @@ func (s *symbolicStack) SwapN(n int) {
 
 func (s *symbolicStack) String() string {
 	ret := "["
-	for i := len(s.data) - 1; i >= 0; i-- {
-		ret += s.data[i].reg.op.String() + " "
-	}
+	for i := 0; i < len(s.data); i++ {
+		op := s.data[i].reg.op
+		cp := s.data[i].reg.cp
 
+		tag := ""
+		if cp != nil {
+			tag = "&"
+		}
+
+		ret += fmt.Sprintf("%s%s ", tag, op.String())
+
+		// ret += op.String() + " "
+	}
 	return ret
 }

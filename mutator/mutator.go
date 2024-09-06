@@ -2,6 +2,7 @@ package mutator
 
 import (
 	"fadingrose/rosy-nigh/abi"
+	"fadingrose/rosy-nigh/core/vm"
 	"fmt"
 	"math/big"
 
@@ -241,4 +242,8 @@ func (m *Mutator) GenerateArgs(me abi.Method) ([]interface{}, []abi.Argument, []
 	}
 
 	return args, inputs, seeds
+}
+
+// Impl Mutator Interface
+func (m *Mutator) AddSolution(rk vm.RegKey, solution string) {
 }

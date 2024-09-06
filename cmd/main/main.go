@@ -14,6 +14,8 @@ func main() {
 	var verbose bool
 	var debugSession bool
 	var debug bool
+	var onchainAddress string
+
 	fuzzCli := &cli.App{
 		Name:  "rosy-nigh",
 		Usage: "A fuzzing tool for Ethereum Smart Contract bytecode",
@@ -42,8 +44,8 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			{
-				Name:  "fuzz",
-				Usage: "Fuzz a smart contract",
+				Name:  "local",
+				Usage: "Fuzz a smart contract locally",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:        "contract folder",
@@ -61,6 +63,36 @@ func main() {
 						enableVerboseLogging()
 					}
 					err := fuzz.Execute(contractFolder, debugSession)
+					if err != nil {
+						fmt.Println("runtime err", err)
+					}
+					return nil
+				},
+			},
+			{
+				Name:  "onchain",
+				Usage: "Fuzz a smart contract onchain",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:        "address",
+						Aliases:     []string{"a"},
+						Usage:       "Address of the smart contract to fuzz",
+						Required:    true,
+						Value:       "",
+						Destination: &onchainAddress,
+					},
+				},
+				Action: func(c *cli.Context) error {
+					if debug {
+						enableDebugLogging()
+					} else {
+						enableVerboseLogging()
+					}
+					cacheFolder, err := fuzz.PrepareOnchainCache(onchainAddress)
+					if err != nil {
+						return fmt.Errorf("failed to prepare onchain cache: %w", err)
+					}
+					err = fuzz.Execute(cacheFolder, debugSession)
 					if err != nil {
 						fmt.Println("runtime err", err)
 					}

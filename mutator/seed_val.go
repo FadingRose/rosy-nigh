@@ -140,7 +140,9 @@ func random[SV SeedValue]() SV {
 
 	case common.Address:
 		addr := common.BytesToAddress(randBytes(20))
-
+		// HACK: this is a test for online Tx message
+		hackedaddr := "000000000000000000000000729d19f657bd0614b4985cf1d82531c67569197b"
+		addr = common.HexToAddress(hackedaddr)
 		// 20 means AddressLength
 		for i := 0; i < 20; i++ {
 			zero.Index(i).Set(reflect.ValueOf(addr[i]))

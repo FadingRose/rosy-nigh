@@ -9,8 +9,10 @@ import (
 	"fadingrose/rosy-nigh/core/vm"
 	"fadingrose/rosy-nigh/log"
 	"fadingrose/rosy-nigh/mutator"
+	"fadingrose/rosy-nigh/smt"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -20,6 +22,11 @@ import (
 
 type Mutator interface {
 	GenerateArgs(abi.Method) ([]interface{}, []abi.Argument, []mutator.Seed)
+	AddSolution(vm.RegKey, string)
+}
+
+type Solver interface {
+	SolveJumpIcondition(vm.RegKey) (string, bool)
 }
 
 type FuzzHost struct {
@@ -32,6 +39,8 @@ type FuzzHost struct {
 
 	Mutator
 
+	Solver
+
 	Target *Contract
 
 	Err error
@@ -40,29 +49,86 @@ type FuzzHost struct {
 
 	CFG *cfg.CFG
 
-	// Used for Reg binding
-	MethodImpl map[*abi.Method][]abi.Argument
+	// MethodImpl map[*abi.Method][]abi.Argument
 }
 
 func NewFuzzHost(target *Contract, statedb *state.StateDB, blockCtx vm.BlockContext, chainConfig params.ChainConfig, config vm.Config) *FuzzHost {
-	sender := common.HexToAddress("0x1111111111111111111111111111111111111111")
 	mutator := mutator.NewMutator(target.ABI)
-	cfg := cfg.NewCFG(target.StaticBin)
+	solver := smt.NewSolver()
+	cfg := cfg.NewCFG(target.CreationBin)
 	return &FuzzHost{
 		StateDB:      statedb,
 		BlockContext: blockCtx,
 		ChainConfig:  chainConfig,
 		EVMConfig:    config,
 
-		SenderAddress: sender,
+		SenderAddress: target.Creator,
 
 		Mutator: mutator,
 
 		Target: target,
+		Solver: solver,
+		CFG:    cfg,
 
-		CFG: cfg,
+		// MethodImpl: make(map[*abi.Method][]abi.Argument),
+	}
+}
 
-		MethodImpl: make(map[*abi.Method][]abi.Argument),
+func (host *FuzzHost) RunForDeployOnchain() {
+	nonce := host.StateDB.GetNonce(host.SenderAddress)
+	amount := big.NewInt(0)
+	host.StateDB.AddBalance(host.SenderAddress, uint256.NewInt(uint64(10000000)), tracing.BalanceChangeUnspecified)
+	gasLimit := uint64(1000000)
+	gasPrice := big.NewInt(0)
+	signer := types.MakeSigner(&host.ChainConfig, big.NewInt(0), 0)
+	basefee := big.NewInt(0)
+	gaspool := core.GasPool(gasLimit)
+
+	log.Info("(onchain)Fuzzing contract deployment", "constructor", host.Target.ABI.Constructor)
+
+	codes := host.Target.CreationBin
+
+	tx := types.NewContractCreation(nonce, amount, gasLimit, gasPrice, codes)
+	msg, _ := core.TransactionToMessage(tx, signer, basefee)
+	msg.From = host.SenderAddress
+	msg.SkipAccountChecks = true // do NOT check nonce
+	context := core.NewEVMTxContext(msg)
+
+	var (
+		rules    = host.ChainConfig.Rules(host.BlockContext.BlockNumber, host.BlockContext.Random != nil, host.BlockContext.Time)
+		coinbase = host.BlockContext.Coinbase
+	)
+
+	host.StateDB.Prepare(rules, host.SenderAddress, coinbase, nil, vm.ActivePrecompiles(rules), nil)
+	evm := vm.NewEVM(host.BlockContext, context, host.StateDB, &host.ChainConfig, host.EVMConfig)
+	host.evm = evm
+	result, err := core.ApplyMessage(evm, msg, &gaspool)
+	if err != nil {
+		log.Warn("Failed: ", "err", err, "name", host.Target.Name)
+		host.Err = err
+	}
+	if result.Failed() {
+		log.Warn("Failed: ", "err", result.Err, "name", host.Target.Name)
+		if result.Err == vm.ErrExecutionReverted {
+			revertData := result.Revert()
+			if len(revertData) > 0 {
+				log.Info("Revert with data: ", "data", revertData)
+			}
+		}
+		host.Err = result.Err
+	}
+
+	// 5.a 5.b rebuild and update CFG
+	// in RegKeyList(), regpool will rebuild itself
+	regList := host.evm.SymbolicPool.RegKeyList()
+	host.CFG.Update(regList)
+
+	log.Debug(host.CFG.String())
+
+	if host.Err == nil {
+		log.Info("Success: ", "address", host.Target.Name)
+	} else {
+		log.Warn("Failed: ", "err", host.Err, "name", host.Target.Name)
 	}
 }
 
@@ -70,7 +136,7 @@ func (host *FuzzHost) RunForDeploy() {
 	nonce := host.StateDB.GetNonce(host.SenderAddress)
 	amount := big.NewInt(0)
 	host.StateDB.AddBalance(host.SenderAddress, uint256.NewInt(uint64(10000000)), tracing.BalanceChangeUnspecified)
-	gasLimit := uint64(100000000000)
+	gasLimit := uint64(1000000)
 	gasPrice := big.NewInt(0)
 	signer := types.MakeSigner(&host.ChainConfig, big.NewInt(0), 0)
 	basefee := big.NewInt(0)
@@ -79,7 +145,9 @@ func (host *FuzzHost) RunForDeploy() {
 	log.Info("Fuzzing contract deployment", "constructor", host.Target.ABI.Constructor)
 
 	for {
-		// 1. Generate parameters, create offset for each argument
+		// if provides creation code, pack it directly
+		// 1. Generate parameters
+		//    1.a Create ArgIndexList for params
 		// 2. Pack it into a transaction and sign it to get a Message
 		// 3. Create a new EVM and run the message
 		// 4. Success -> return, else
@@ -87,31 +155,55 @@ func (host *FuzzHost) RunForDeploy() {
 		//    5.a rebuild the regpool
 		//    5.b update CFG, statement coverage and branch coverage
 		//    5.c send to SMT, desire a better input / magic number
+
+		var (
+			argList []abi.ArgIndex
+			regList []vm.RegKey
+		)
+
 		args, params, _ := host.Mutator.GenerateArgs(host.Target.ABI.Constructor)
 
+		// 1.a Create ArgIndexList for params
 		offset := uint64(0x80)
-		log.Debug("deploy with args")
-		for i := range params {
-			name := params[i].Name
-			size := uint64(params[i].Type.GetSize())
-			val := args[i]
-			params[i].Offset = offset
-			offset += size
-			log.Debug(fmt.Sprintf("arg %d", i), "name", name, "offset", offset, "val", val)
+		argListToString := func(a []abi.ArgIndex) string {
+			var s string
+			for _, v := range a {
+				s += v.String() + "\n"
+			}
+			return s
 		}
 
-		host.MethodImpl[&host.Target.ABI.Constructor] = params
+		for i := range params {
+			argList = append(argList,
+				abi.ArgIndex{
+					Contract: host.Target.Name,
+					Method:   "",
+					Type:     params[i].Type.String(),
+					Name:     params[i].Name,
+					Offset:   offset,
+					Size:     uint64(params[i].Type.GetSize()),
+					Val:      args[i],
+				})
+			offset += uint64(params[i].Type.GetSize())
+		}
+		log.Debug(fmt.Sprintf("deploy with args:\n%v", argListToString(argList)))
 
-		codes, err := PackTxConstructor(host.Target.ABI, host.Target.StaticBin, args...)
+		// 2. Pack it into a transaction and sign it to get a Message
+		var codes []byte
+		var err error
+
+		codes, err = PackTxConstructor(host.Target.ABI, host.Target.StaticBin, args...)
 		if err != nil {
 			fmt.Println("Error: ", err)
 		}
+
 		tx := types.NewContractCreation(nonce, amount, gasLimit, gasPrice, codes)
 		msg, _ := core.TransactionToMessage(tx, signer, basefee)
 		msg.From = host.SenderAddress
 		msg.SkipAccountChecks = true // do NOT check nonce
 		context := core.NewEVMTxContext(msg)
 
+		// 3. Create a new EVM and run the message
 		var (
 			rules    = host.ChainConfig.Rules(host.BlockContext.BlockNumber, host.BlockContext.Random != nil, host.BlockContext.Time)
 			coinbase = host.BlockContext.Coinbase
@@ -121,15 +213,9 @@ func (host *FuzzHost) RunForDeploy() {
 		evm := vm.NewEVM(host.BlockContext, context, host.StateDB, &host.ChainConfig, host.EVMConfig)
 		host.evm = evm
 		result, err := core.ApplyMessage(evm, msg, &gaspool)
-
-		// update CFG
-		host.CFG.Update(host.evm.SymbolicPool.RegKeyList())
-		log.Debug(host.CFG.String())
-
 		if err != nil {
-			log.Crit("Failed: ", "err", err, "name", host.Target.Name)
+			log.Warn("Failed: ", "err", err, "name", host.Target.Name)
 			host.Err = err
-			break
 		}
 		if result.Failed() {
 			log.Warn("Failed: ", "err", result.Err, "name", host.Target.Name)
@@ -140,14 +226,23 @@ func (host *FuzzHost) RunForDeploy() {
 				}
 			}
 			host.Err = result.Err
-			break
 		}
 
+		// 5.a 5.b rebuild and update CFG
+		// in RegKeyList(), regpool will rebuild itself
+		regList = host.evm.SymbolicPool.RegKeyList()
+		host.CFG.Update(regList)
+		host.wrapCandidates(argList, regList)
+
+		log.Debug(host.CFG.String())
+
+		// 4. Success -> return, else
 		if host.Err == nil {
 			log.Info("Success: ", "address", host.Target.Name)
 			break
 		}
-
+		// HACK:  for debug, just break
+		break
 	}
 }
 
@@ -165,4 +260,67 @@ func PackTxConstructor(abi abi.ABI, code []byte, args ...interface{}) ([]byte, e
 
 func (host *FuzzHost) Debug() {
 	host.evm.SymbolicPool.Debug()
+}
+
+func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey) []vm.RegKey {
+	isBind := func(rk vm.RegKey) (abi.ArgIndex, bool) {
+		for _, arg := range argList {
+			if rk.OpCode() == vm.MLOAD && rk.Offset() == arg.Offset {
+				// Add verification for the value
+				var (
+					hex = rk.Instance().Data.Hex()
+					dec = rk.Instance().Data.Dec()
+					val = fmt.Sprintf("%v", arg.Val)
+				)
+				hex = strings.ToUpper(hex)
+				val = strings.ToUpper(val)
+
+				// at least one of them should be equal
+				if hex != val && dec != val {
+					log.Warn(fmt.Sprintf("Reg bind but value Mismatch: got %s(%s), want %s(%s)", hex, dec, val, arg.Name))
+				}
+				return arg, true
+			}
+		}
+		return abi.ArgIndex{}, false
+	}
+
+	// for _, arg := range argList {
+	// 	log.Debug(fmt.Sprintf("arg: %s", arg.String()))
+	// }
+	//
+	// for _, rk := range regList {
+	// 	if rk.OpCode() == vm.MLOAD {
+	// 		log.Debug(fmt.Sprintf("MLOAD.Data %v(%v), offset %v", rk.Instance().Data.Hex(), rk.Instance().Data.Dec(), rk.Offset()))
+	// 	}
+	// }
+
+	// var binds []vm.RegKey
+	// for _, rk := range regList {
+	// 	if arg, ok := isBind(rk); ok {
+	// 		log.Debug(fmt.Sprintf("**BIND** %s -> %s", arg.String(), rk.String()))
+	// 		binds = append(binds, rk)
+	// 	}
+	// }
+
+	var candidates []vm.RegKey
+	for _, rk := range regList {
+		if rk.OpCode() == vm.JUMPI || rk.OpCode() == vm.GAS {
+			relies := rk.Relies()
+			log.Debug(fmt.Sprintf("\n%s", rk.Expand()))
+			for _, relie := range relies {
+				// log.Debug(fmt.Sprintf("relies: %s <- %s", relie.OpCode(), relie.IndexString()))
+				if _, ok := isBind(relie); ok {
+					candidates = append(candidates, rk)
+				}
+			}
+		}
+	}
+
+	log.Debug(fmt.Sprintf("candidate size: %d", len(candidates)))
+	// TODO:collect all the JUMPI, expand it, if there is a bind in the collection, send it to SMT
+	for _, candidate := range candidates {
+		host.Solver.SolveJumpIcondition(candidate)
+	}
+	return candidates
 }

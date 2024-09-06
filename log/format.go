@@ -32,7 +32,7 @@ type TerminalStringer interface {
 
 func (h *TerminalHandler) format(buf []byte, r slog.Record, usecolor bool) []byte {
 	msg := escapeMessage(r.Message)
-	var color = ""
+	color := ""
 	if usecolor {
 		switch r.Level {
 		case LevelCrit:
@@ -67,7 +67,7 @@ func (h *TerminalHandler) format(buf []byte, r slog.Record, usecolor bool) []byt
 	b.WriteString(msg)
 
 	// try to justify the log output for short messages
-	//length := utf8.RuneCountInString(msg)
+	// length := utf8.RuneCountInString(msg)
 	length := len(msg)
 	if (r.NumAttrs()+len(h.attrs)) > 0 && length < termMsgJust {
 		b.Write(spaces[:termMsgJust-length])
@@ -104,8 +104,8 @@ func (h *TerminalHandler) formatAttributes(buf *bytes.Buffer, r slog.Record, col
 			buf.Write(spaces[:padding-length])
 		}
 	}
-	var n = 0
-	var nAttrs = len(h.attrs) + r.NumAttrs()
+	n := 0
+	nAttrs := len(h.attrs) + r.NumAttrs()
 	for _, attr := range h.attrs {
 		writeAttr(attr, n == 0, n == nAttrs-1)
 		n++
@@ -304,13 +304,14 @@ func escapeMessage(s string) string {
 	needsQuoting := false
 	for _, r := range s {
 		// Allow CR/LF/TAB. This is to make multi-line messages work.
-		if r == '\r' || r == '\n' || r == '\t' {
+		if r == '\r' || r == '\n' || r == '\t' || r == '└' || r == '─' {
 			continue
 		}
 		// We quote everything below <space> (0x20) and above~ (0x7E),
 		// plus equal-sign
 		if r < ' ' || r > '~' || r == '=' {
 			needsQuoting = true
+			fmt.Printf("log quote string due to r=%s\n", string(r))
 			break
 		}
 	}

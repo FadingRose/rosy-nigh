@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"fadingrose/rosy-nigh/core/tracing"
+	"fadingrose/rosy-nigh/log"
 	"fmt"
 	"maps"
 
@@ -79,14 +80,18 @@ func (s *stateObject) Code() []byte {
 	if len(s.code) != 0 {
 		return s.code
 	}
+	code, err := s.db.online.ContractCode(s.address, common.BytesToHash(s.data.CodeHash))
+	if err != nil {
+		log.Warn("can't fetch code online hash %x for %s", s.data.CodeHash, s.address)
+	} else {
+		// fmt.Println("Code from online db: ", len(code))
+		return code
+	}
+
 	if bytes.Equal(s.CodeHash(), types.EmptyCodeHash.Bytes()) {
 		return nil
 	}
 
-	code, err := s.db.online.ContractCode(s.address, common.BytesToHash(s.data.CodeHash))
-	if err != nil {
-		s.db.setError(fmt.Errorf("can't fetch code online hash %x for %s", s.data.CodeHash, s.address))
-	}
 	return code
 }
 
@@ -97,12 +102,16 @@ func (s *stateObject) CodeSize() int {
 	if len(s.code) != 0 {
 		return len(s.code)
 	}
-	if bytes.Equal(s.CodeHash(), types.EmptyCodeHash.Bytes()) {
-		return 0
-	}
 	size, err := s.db.online.ContractCodeSize(s.address, common.BytesToHash(s.data.CodeHash))
 	if err != nil {
 		s.db.setError(fmt.Errorf("can't fetch code size online hash %x for %s", s.data.CodeHash, s.address))
+	} else {
+		fmt.Println("CodeSize from online db: ", size)
+		return size
+	}
+
+	if bytes.Equal(s.CodeHash(), types.EmptyCodeHash.Bytes()) {
+		return 0
 	}
 	return size
 }

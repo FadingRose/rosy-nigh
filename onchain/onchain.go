@@ -2,8 +2,10 @@ package onchain
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -14,13 +16,13 @@ import (
 // See [Database interface](../core/state/database.go)
 type OnChainDataBase struct {
 	apikeys   map[Chain]APIKey
-	CodeCache map[common.Hash][]byte
+	CodeCache map[common.Address][]byte
 }
 
 func NewOnChainDataBase() *OnChainDataBase {
 	return &OnChainDataBase{
 		apikeys:   ApiKeys(),
-		CodeCache: make(map[common.Hash][]byte),
+		CodeCache: loadCodeCache(),
 	}
 }
 
@@ -30,7 +32,7 @@ type ChainImpl interface {
 }
 
 func (c *OnChainDataBase) ContractCode(address common.Address, hash common.Hash) ([]byte, error) {
-	if code, ok := c.CodeCache[hash]; ok {
+	if code, ok := c.CodeCache[address]; ok {
 		return code, nil
 	}
 	// TODO support more chains
@@ -40,15 +42,19 @@ func (c *OnChainDataBase) ContractCode(address common.Address, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
-
+	if strings.HasPrefix(string(data), "0x") {
+		data = data[2:]
+	}
 	hash = hasher(data)
-	c.CodeCache[hash] = data
+	c.CodeCache[address] = data
+
+	appendCodeCache(address, data)
 
 	return data, nil
 }
 
 func (c *OnChainDataBase) ContractCodeSize(address common.Address, hash common.Hash) (int, error) {
-	if code, ok := c.CodeCache[hash]; ok {
+	if code, ok := c.CodeCache[address]; ok {
 		return len(code), nil
 	}
 	eth := Chain(ETH)
@@ -56,9 +62,13 @@ func (c *OnChainDataBase) ContractCodeSize(address common.Address, hash common.H
 	if err != nil {
 		return 0, err
 	}
-
+	if strings.HasPrefix(string(data), "0x") {
+		data = data[2:]
+	}
 	hash = hasher(data)
-	c.CodeCache[hash] = data
+	c.CodeCache[address] = data
+
+	appendCodeCache(address, data)
 
 	return len(data), nil
 }
@@ -108,10 +118,129 @@ func (c Chain) GetCode(address string, api APIKey) ([]byte, error) {
 		"API_KEY": api,
 	}
 	endpoint := c.endpoint(callcode, args)
-	return c.get(endpoint)
+	return c.getCode(endpoint)
 }
 
-func (c Chain) get(endpoint string) ([]byte, error) {
+func (c Chain) getCode(endpoint string) ([]byte, error) {
+	type sample struct {
+		Jsonrpc string `json:"jsonrpc"`
+		Id      int    `json:"id"`
+		Result  string `json:"result"`
+	}
+	var s sample
+	s, err := get(endpoint, s)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(s.Result), nil
+}
+
+func (c Chain) GetTx(txhash string, api APIKey) (from common.Address, input []byte, to common.Address, err error) {
+	args := map[string]string{
+		"TX_HASH": txhash,
+		"API_KEY": api,
+	}
+	endpoint := c.endpoint(getTx, args)
+	return c.getTx(endpoint)
+}
+
+func (c Chain) getTx(endpoint string) (from common.Address, input []byte, to common.Address, err error) {
+	type sample struct {
+		Jsonrpc string                 `json:"jsonrpc"`
+		Id      int                    `json:"id"`
+		Result  map[string]interface{} `json:"result"`
+	}
+	var s sample
+	s, err = get(endpoint, s)
+	if err != nil {
+		return
+	}
+
+	if _, ok := s.Result["from"].(string); !ok {
+		from = common.Address{}
+	} else {
+		from = common.HexToAddress(s.Result["from"].(string))
+	}
+	if _, ok := s.Result["input"].(string); !ok {
+		input = []byte{}
+	} else {
+		inputStr := s.Result["input"].(string)
+		inputStr = strings.TrimPrefix(inputStr, "0x")
+		input = []byte(inputStr)
+	}
+	if _, ok := s.Result["to"].(string); !ok {
+		to = common.Address{}
+	} else {
+		to = common.HexToAddress(s.Result["to"].(string))
+	}
+	return
+}
+
+func (c Chain) GetCreation(contractAddress string, api APIKey) (creator common.Address, txHash string, err error) {
+	args := map[string]string{
+		"CONTRACT_ADDRESS": contractAddress,
+		"API_KEY":          api,
+	}
+	endpoint := c.endpoint(getcreation, args)
+	return c.getCreation(endpoint)
+}
+
+func (c Chain) getCreation(endpoint string) (creator common.Address, txHash string, err error) {
+	type sample struct {
+		Jsonrpc string                   `json:"jsonrpc"`
+		Id      int                      `json:"id"`
+		Result  []map[string]interface{} `json:"result"`
+	}
+	var s sample
+	s, err = get(endpoint, s)
+	if err != nil {
+		return
+	}
+
+	if _, ok := s.Result[0]["contractCreator"].(string); !ok {
+		creator = common.Address{}
+	} else {
+		creator = common.HexToAddress(s.Result[0]["contractCreator"].(string))
+	}
+
+	if _, ok := s.Result[0]["txHash"].(string); !ok {
+		txHash = ""
+	} else {
+		txHash = s.Result[0]["txHash"].(string)
+	}
+
+	return
+}
+
+func (c Chain) GetABI(contractAddress string, api APIKey) (abi string, err error) {
+	args := map[string]string{
+		"CONTRACT_ADDRESS": contractAddress,
+		"API_KEY":          api,
+	}
+	endpoint := c.endpoint(getabi, args)
+	return c.getABI(endpoint)
+}
+
+func (c Chain) getABI(endpoint string) (abi string, err error) {
+	type sample struct {
+		Jsonrpc string      `json:"jsonrpc"`
+		Id      int         `json:"id"`
+		Result  interface{} `json:"result"`
+	}
+	var s sample
+	s, err = get(endpoint, s)
+	if err != nil {
+		return
+	}
+	if _, ok := s.Result.(string); !ok {
+		abi = ""
+	} else {
+		abi = s.Result.(string)
+	}
+	return
+}
+
+func get[T any](endpoint string, s T) (T, error) {
 	proxyURL, err := url.Parse("http://192.168.1.158:7890")
 	if err != nil {
 		panic(err)
@@ -124,22 +253,18 @@ func (c Chain) get(endpoint string) ([]byte, error) {
 		Transport: transport,
 		Timeout:   time.Second * 10,
 	}
+	fmt.Println("GET", endpoint)
 	resp, err := client.Get(endpoint)
 	if err != nil {
-		return nil, err
+		return s, err
 	}
 	defer resp.Body.Close()
 
-	type sample struct {
-		Jsonrpc string `json:"jsonrpc"`
-		Id      int    `json:"id"`
-		Result  string `json:"result"`
-	}
-	var s sample
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
-		return nil, err
+		return s, err
 	}
-	return []byte(s.Result), nil
+
+	return s, nil
 }
 
 func StringToChain(s string) Chain {

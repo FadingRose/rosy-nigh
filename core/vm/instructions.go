@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fadingrose/rosy-nigh/core/tracing"
+	"fadingrose/rosy-nigh/log"
 	"math"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -750,8 +751,10 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 
 	ret, returnGas, err := interpreter.evm.StaticCall(scope.Contract, toAddr, args, gas)
 	if err != nil {
+		log.Debug("StaticCall failed", "err", err)
 		temp.Clear()
 	} else {
+		log.Debug("StaticCall success", "ret", ret)
 		temp.SetOne()
 	}
 	stack.push(&temp)

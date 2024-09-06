@@ -108,7 +108,7 @@ func (i *instruction) BranchCoverage() (int, int) {
 func (i *instruction) String() string {
 	argStr := ""
 	if i.arg != nil {
-		argStr = fmt.Sprintf("%x", i.arg)
+		argStr = fmt.Sprintf("0x%x", i.arg)
 	}
 	coverStr := ""
 	switch i.op {
@@ -117,6 +117,7 @@ func (i *instruction) String() string {
 	case vm.JUMPI:
 		coverStr = i.JMPIBranch.String()
 	}
+
 	return fmt.Sprintf("0x%x(%d) %s %s %s", i.pc, i.pc, i.op.String(), argStr, coverStr)
 }
 

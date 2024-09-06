@@ -30,7 +30,6 @@ debug:
 	@echo "Building $(BINARY_NAME) with debug flags..."
 	@mkdir -p $(BUILD_DIR)
 	@$(GOBUILD) $(LDDEBUG) -o $(BUILD_DIR)/$(BINARY_NAME) $(SRC_DIR)
-
 # Run the tests
 test:
 	@echo "Running tests..."

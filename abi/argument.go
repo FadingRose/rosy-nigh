@@ -19,11 +19,24 @@ package abi
 import (
 	"encoding/json"
 	"errors"
-	"fadingrose/rosy-nigh/core/vm"
 	"fmt"
 	"reflect"
 	"strings"
 )
+
+type ArgIndex struct {
+	Contract string
+	Method   string
+	Type     string
+	Name     string
+	Offset   uint64
+	Size     uint64
+	Val      interface{}
+}
+
+func (ai ArgIndex) String() string {
+	return fmt.Sprintf("Contract: %s, Method: %s, Type: %s, Name: %s, Offset: %d, Size: %d, Val: %v", ai.Contract, ai.Method, ai.Type, ai.Name, ai.Offset, ai.Size, ai.Val)
+}
 
 // Argument holds the name of the argument and the corresponding type.
 // Types are used when packing and testing arguments.
@@ -32,13 +45,10 @@ type Argument struct {
 	Type    Type
 	Indexed bool // indexed is only used by events
 
-	// HACKED
-	RegKey vm.RegKey
-	Offset uint64 // the offset at the paramlist
+	// ArgIndex // ArgIndex support for fuzzing, SMT solver
 }
 
 // Impl ArgumentABI interface
-
 func (arg Argument) ArguemntName() string {
 	return arg.Type.String() + "_" + arg.Name
 }

@@ -6,6 +6,7 @@ import (
 	"fadingrose/rosy-nigh/core/state"
 	"fadingrose/rosy-nigh/core/vm"
 	"fadingrose/rosy-nigh/log"
+	"fadingrose/rosy-nigh/onchain"
 	"fmt"
 	"math/big"
 
@@ -14,12 +15,13 @@ import (
 )
 
 type Contract struct {
-	ABI        abi.ABI
-	StaticBin  []byte // static bytecode without depoy arguments
-	DeployeBin []byte // static bytecode with deploy arguments
-	RuntimeBin []byte // runtime bytecode
-	Version    string
-	Name       string
+	ABI         abi.ABI
+	StaticBin   []byte // static bytecode without depoy arguments
+	CreationBin []byte // static bytecode with deploy arguments
+	RuntimeBin  []byte // runtime bytecode
+	Version     string
+	Name        string
+	Creator     common.Address
 }
 
 func CreateEVMRuntimeEnironment() (statedb *state.StateDB, blockCtx vm.BlockContext, chainConfig params.ChainConfig, config vm.Config) {
@@ -58,7 +60,45 @@ func CreateEVMRuntimeEnironment() (statedb *state.StateDB, blockCtx vm.BlockCont
 	return statedb, blockCtx, chainConfig, config
 }
 
-// Execute is the main entry point for the fuzz
+// PrepareOnchainCache is used to prepare the onchain cache
+func PrepareOnchainCache(onchainAddress string) (cacheFolder string, err error) {
+	if cacheDir, ok := hasCached(onchainAddress); ok {
+		log.Info(fmt.Sprintf("cache find at %s", cacheDir))
+		return cacheDir, nil
+	}
+
+	// 1. Get CreationTx and ABI
+	// 2. From Creationtx, get the deployed bytecode(means with the creation arguments)
+	var (
+		api     = onchain.ApiKeys()[onchain.ETH]
+		eth     = onchain.Chain(onchain.ETH)
+		txhash  string
+		creator common.Address
+		// from          common.Address
+		creationCodes []byte
+		// to            common.Address
+		abi string
+	)
+
+	creator, txhash, err = eth.GetCreation(onchainAddress, api)
+	if err != nil {
+		return "", fmt.Errorf("failed to get contract creation: %w", err)
+	}
+
+	abi, err = eth.GetABI(onchainAddress, api)
+	if err != nil {
+		return "", fmt.Errorf("failed to get contract abi: %w", err)
+	}
+
+	_, creationCodes, _, err = eth.GetTx(txhash, api)
+	if err != nil {
+		return "", fmt.Errorf("failed to get contract transaction: %w", err)
+	}
+
+	return saveDeployedBin(onchainAddress, creationCodes, abi, creator.Hex())
+}
+
+// Execute is the main entry point for the local fuzz
 func Execute(contractFolder string, debug bool) error {
 	// Load and resolve contracts
 	contracts, err := loadContractsFromDir(contractFolder)
@@ -72,7 +112,7 @@ func Execute(contractFolder string, debug bool) error {
 		var res []*Contract
 		for _, contract := range contracts {
 			if contains(orphans, contract.Name) {
-				if len(contract.StaticBin) > 0 {
+				if len(contract.StaticBin) > 0 || len(contract.CreationBin) > 0 {
 					res = append(res, contract) // ignore interface
 				}
 			}
@@ -81,6 +121,7 @@ func Execute(contractFolder string, debug bool) error {
 	}()
 
 	log.Info("Fuzzing Tasks: ", "orphans", orphans)
+
 	for _, contract := range targets {
 		err := execute(contract, debug)
 		if err != nil {
@@ -102,6 +143,9 @@ func execute(contract *Contract, debug bool) error {
 
 	statedb, blockCtx, chainConfig, config := CreateEVMRuntimeEnironment()
 	host = NewFuzzHost(contract, statedb, blockCtx, chainConfig, config)
-	host.RunForDeploy()
+
+	log.Info("Fuzzing contract: ", "name", contract.Name)
+	// host.RunForDeploy()
+	host.RunForDeployOnchain()
 	return nil
 }

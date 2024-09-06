@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fadingrose/rosy-nigh/log"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 
 type Reg struct {
 	// NOTE: We index a unique reg by depth, pc, loop
+	// regkey       RegKey
 	index        [3]uint64
 	paramSize    int
 	pushbackSize int
@@ -30,6 +32,9 @@ type Reg struct {
 	// for JUMP / JUMPI
 	dest uint64
 	cond uint64
+
+	// for MLOAD
+	offset uint64
 }
 
 func newReg(index [3]uint64, op OpCode, paramSize int, pushbackSize int) *Reg {
@@ -48,6 +53,73 @@ func (r *Reg) name() string {
 
 func (r *Reg) pc() uint64 {
 	return r.index[1]
+}
+
+func (r *Reg) RegKey() RegKey {
+	return RegKey{
+		index: r.index,
+		reg:   r,
+	}
+}
+
+func (r *Reg) Expand() string {
+	return r.expand(0)
+}
+
+func (r *Reg) expand(depth int) string {
+	if depth > 1024 {
+		log.Warn("reg expand overflow, depth > 1024")
+		return ""
+	}
+	var builder strings.Builder
+	// indentation for the tree structure
+	indent := strings.Repeat(".", 6)
+	indents := strings.Repeat(indent, depth)
+
+	nameWithOp := func(r *Reg) string {
+		return fmt.Sprintf("%s %s", r.name(), r.op.String())
+	}
+
+	// isSkip returns true if we do NOT expand the next node
+	isSkip := func(op OpCode) bool {
+		control := []OpCode{STOP, POP, JUMPDEST}
+		for _, c := range control {
+			if c == op {
+				return true
+			}
+		}
+		if op.IsDup() || op.IsLog() || op.IsSwap() || op.IsPush() {
+			return true
+		}
+		return false
+	}
+
+	val := r.Data.Hex()
+
+	if depth == 0 {
+		builder.WriteString(fmt.Sprintf("%s\n", nameWithOp(r)))
+	} else {
+		// Write the current node
+		builder.WriteString(fmt.Sprintf("%s   └── %s <- %s\n", indents, nameWithOp(r), val))
+	}
+
+	if isSkip(r.op) {
+		return builder.String()
+	}
+
+	for _, it := range r.itor() {
+		if it == r.me {
+			continue
+		}
+		if func(a, b [3]uint64) bool {
+			return a[0] == b[0] && a[1] == b[1] && a[2] == b[2]
+		}(it.index, r.index) {
+			continue
+		}
+		builder.WriteString(it.expand(depth + 1))
+	}
+
+	return builder.String()
 }
 
 func (r *Reg) String() string {
@@ -159,6 +231,10 @@ func (r *Reg) setupParams(params []RegKey) {
 		r.dest = params[1].reg.Data.Uint64()
 	}
 
+	if r.op == MLOAD {
+		r.offset = params[0].reg.Data.Uint64()
+	}
+
 	set := func(i int, reg *Reg) {
 		switch i {
 		case 0:
@@ -182,4 +258,46 @@ func (r *Reg) setupParams(params []RegKey) {
 	for i, regKey := range params {
 		set(i, regKey.reg)
 	}
+}
+
+// Relies recursively return all the regkeys that this reg relies on
+func (r *Reg) Relies() []RegKey {
+	ret := make([]RegKey, 0)
+	relies := func(reg *Reg) {
+		if reg == nil {
+			return
+		}
+		if reg == r || reg.me == r {
+			ret = append(ret, reg.RegKey())
+			return
+		}
+		ret = append(ret, reg.Relies()...)
+	}
+
+	for _, it := range r.itor() {
+		if it == nil {
+			break
+		}
+		relies(it)
+	}
+
+	return ret
+}
+
+func (r *Reg) itor() []*Reg {
+	var ret []*Reg
+
+	if r.cp == nil {
+		ret = []*Reg{r.me, r.L, r.M, r.R0, r.R1, r.R2, r.R3, r.R4}
+	} else {
+		ret = []*Reg{r.cp, r.L, r.M, r.R0, r.R1, r.R2, r.R3, r.R4}
+	}
+
+	for i := range ret {
+		if ret[i] == nil {
+			ret = ret[:i]
+			break
+		}
+	}
+	return ret
 }

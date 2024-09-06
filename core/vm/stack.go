@@ -71,3 +71,7 @@ func (st *Stack) peekVal() uint256.Int {
 func (st *Stack) Back(n int) *uint256.Int {
 	return &st.data[st.len()-n-1]
 }
+
+func (st *Stack) Last(n int) []uint256.Int {
+	return st.data[st.len()-n:]
+}

@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fadingrose/rosy-nigh/core/tracing"
+	"fadingrose/rosy-nigh/log"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -190,12 +191,14 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(stack)
 				if overflow {
-					return nil, ErrGasUintOverflow
+					log.Warn("memorySize overflow", "depth", in.evm.depth, "pc", pc, "op", op, "stack", stack.Last(5))
+					return nil, ErrRequireMemoryOverflow
 				}
 				// memory is expanded in words of 32 bytes. Gas
 				// is also calculated in words.
 				if memorySize, overflow = math.SafeMul(toWordSize(memSize), 32); overflow {
-					return nil, ErrGasUintOverflow
+					log.Warn("memorySize overflow", "depth", in.evm.depth, "pc", pc, "op", op)
+					return nil, ErrRequireMemoryOverflow
 				}
 			}
 			// Consume the gas and return an error if not enough gas is available.
@@ -207,6 +210,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
 			if !contract.UseGas(dynamicCost, in.evm.Config.Tracer, tracing.GasChangeIgnored) {
+				fmt.Printf("dynamicCost contract gas %d out of gas: %d \n", contract.Gas, dynamicCost)
 				return nil, ErrOutOfGas
 			}
 

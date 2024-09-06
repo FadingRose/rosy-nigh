@@ -3,6 +3,7 @@ module fadingrose/rosy-nigh
 go 1.21.4
 
 require (
+	github.com/aclements/go-z3 v0.0.0-20220809013456-4675d5f90ca5
 	github.com/consensys/gnark-crypto v0.12.1
 	github.com/ethereum/go-ethereum v1.14.8
 	github.com/holiman/uint256 v1.3.1

@@ -2,6 +2,7 @@ package state
 
 import (
 	"fadingrose/rosy-nigh/core/tracing"
+	"fadingrose/rosy-nigh/onchain"
 	"fmt"
 	"slices"
 
@@ -57,7 +58,9 @@ type StateDB struct {
 }
 
 func NewStateDB() *StateDB {
+	onlinedb := onchain.NewOnChainDataBase()
 	return &StateDB{
+		online:               onlinedb,
 		stateObjects:         make(map[common.Address]*stateObject),
 		stateObjectsDestruct: make(map[common.Address]*stateObject),
 		accessList:           newAccessList(),
@@ -204,18 +207,21 @@ func (s *StateDB) getOrNewStateObject(addr common.Address) *stateObject {
 func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	// Prefer live objects if any is available
 	if obj := s.stateObjects[addr]; obj != nil {
+		// fmt.Println("state object is found")
 		return obj
 	}
 	// Short circuit if the account is already destructed in this block.
 	if _, ok := s.stateObjectsDestruct[addr]; ok {
+		// fmt.Println("state object is already destructed")
 		return nil
 	}
 
-	// TODO online fuzzing suport
+	// TODO: online fuzzing suport
 
 	// Create New Object and insert into the live set
 	obj := newObject(s, addr, nil)
 	s.setStateObject(obj)
+	// fmt.Println("state object is created")
 	return obj
 }
 
