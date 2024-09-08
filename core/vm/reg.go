@@ -235,6 +235,10 @@ func (r *Reg) setupParams(params []RegKey) {
 		r.offset = params[0].reg.Data.Uint64()
 	}
 
+	if r.op == CALLDATALOAD {
+		r.offset = params[0].reg.Data.Uint64() + uint64(0x04)
+	}
+
 	set := func(i int, reg *Reg) {
 		switch i {
 		case 0:

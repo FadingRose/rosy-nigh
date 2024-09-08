@@ -60,5 +60,4 @@ __pycache__
 testdata
 scripts
 keys.toml
-.cache/creation/0x7cb24a53b623c0bd5e70a73377ad78330bbe17ea
-.cache/statedb/0xA9De970fd0921478A93ff268457A3D9b573D9919
+.cache/

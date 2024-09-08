@@ -147,5 +147,16 @@ func execute(contract *Contract, debug bool) error {
 	log.Info("Fuzzing contract: ", "name", contract.Name)
 	// host.RunForDeploy()
 	host.RunForDeployOnchain()
+
+	funcs := host.Scheduler.GetFucsSequence()
+
+	for _, f := range funcs {
+		fmt.Printf("running %s\n", f.Name)
+		host.FuzzOnce(f)
+		if host.Err != nil {
+			break
+		}
+	}
+
 	return nil
 }
