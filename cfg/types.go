@@ -58,6 +58,9 @@ type instruction struct {
 
 	JMPIBranch // support JUMPI / JUMP
 	JMPBranch
+
+	sloadVisit  int
+	sstoreVisit int
 }
 
 func (i *instruction) CoverJumpI(index int32, branch CondBranch) {
@@ -112,6 +115,7 @@ func (i *instruction) String() string {
 		argStr = fmt.Sprintf("0x%x", i.arg)
 	}
 	coverStr := ""
+	slotCoverStr := ""
 	switch i.op {
 	case vm.JUMP:
 		coverStr = i.JMPBranch.String()
@@ -119,7 +123,14 @@ func (i *instruction) String() string {
 		coverStr = i.JMPIBranch.String()
 	}
 
-	return fmt.Sprintf("0x%x(%d) %s %s %s", i.pc, i.pc, i.op.String(), argStr, coverStr)
+	if i.op == vm.SLOAD || i.op == vm.SSTORE {
+		slotCoverStr = "[ ]"
+		if i.sloadVisit > 0 || i.sstoreVisit > 0 {
+			slotCoverStr = "[x]"
+		}
+	}
+
+	return fmt.Sprintf("0x%x(%d) %s %s %s%s", i.pc, i.pc, i.op.String(), argStr, coverStr, slotCoverStr)
 }
 
 type Block struct {
@@ -155,30 +166,49 @@ func (b *Block) appendStmt(stmt *instruction) {
 
 // IsLeadingEnd returns true if the opcode is a leading end of a basic block.
 // JUMP | JUMPI | STOP | RETURN | REVERT | INVALID | SELFDESTRUCT
-func isLeadingEnd(op vm.OpCode) bool {
+func isLeadingEnd(op vm.OpCode, nxtop vm.OpCode) bool {
 	switch op {
 	case vm.JUMP, vm.JUMPI, vm.STOP, vm.RETURN, vm.REVERT, vm.INVALID, vm.SELFDESTRUCT:
 		return true
 	default:
-		return false
+		return isLeadingStart(nxtop)
 	}
 }
 
+// isLeadingStart returns true if the opcode is a leading start of a basic block.
+// JUMPDEST
+func isLeadingStart(op vm.OpCode) bool {
+	return op == vm.JUMPDEST
+}
+
+type SlotCoverage struct {
+	SSTORECover int
+	SSTORETotal int
+	SLOADCover  int
+	SLOADTotal  int
+}
 type CFG struct {
 	Blocks   []*Block // blocks[0] is entry; order otherwise undefined
 	PathDict *PathDict
 
-	blockMap map[uint64]*Block
+	blockMap     map[uint64]*Block
+	slotCoverage SlotCoverage
 }
 
 func NewCFG(bytecode []byte) *CFG {
-	var blocks []*Block
-
+	var (
+		blocks      []*Block
+		sstoreTotal = 0
+		sloadTotal  = 0
+	)
 	cur := newBlock(0)
 	cur.Live = true // start collect statements from root
 
 	blockmap := make(map[uint64]*Block)
 	it := asm.NewInstructionIterator(bytecode)
+	nxtit := asm.NewInstructionIterator(bytecode)
+	nxtit.Next()
+
 	for it.Next() {
 		cur.appendStmt(&instruction{
 			pc:         it.PC(),
@@ -189,7 +219,15 @@ func NewCFG(bytecode []byte) *CFG {
 			JMPIBranch: make(JMPIBranch),
 		})
 
-		if isLeadingEnd(it.Op()) {
+		if it.Op() == vm.SSTORE {
+			sstoreTotal++
+		}
+
+		if it.Op() == vm.SLOAD {
+			sloadTotal++
+		}
+		nxtit.Next()
+		if isLeadingEnd(it.Op(), nxtit.Op()) {
 			idx := cur.Index + 1
 			blocks = append(blocks, cur)
 			cur = newBlock(idx)
@@ -203,6 +241,9 @@ func NewCFG(bytecode []byte) *CFG {
 		PathDict: NewPathDict(),
 
 		blockMap: blockmap,
+		slotCoverage: SlotCoverage{
+			0, sstoreTotal, 0, sloadTotal,
+		},
 	}
 }
 
@@ -225,7 +266,8 @@ func (cfg *CFG) String() string {
 func (cfg *CFG) CoverageString() string {
 	coveredBranch, totalBranch := cfg.BranchCoverage()
 	coveredStmt, totalStmt := cfg.StatementCoverage()
-	return fmt.Sprintf("Branch coverage: %d/%d  Statement Coverage: %d/%d\n", coveredBranch, totalBranch, coveredStmt, totalStmt)
+	slotCoverage := cfg.SlotCoverage()
+	return fmt.Sprintf("Branch coverage: %d/%d  Statement Coverage: %d/%d\n SlotCoverage: R(%d/%d) W(%d/%d)\n", coveredBranch, totalBranch, coveredStmt, totalStmt, slotCoverage.SLOADCover, slotCoverage.SLOADTotal, slotCoverage.SSTORECover, slotCoverage.SSTORETotal)
 }
 
 // Update updates the CFG with the given list of register keys.
@@ -252,6 +294,27 @@ func (cfg *CFG) StringCoverage() string {
 	coveredBranch, totalBranch := cfg.BranchCoverage()
 	coveredStmt, totalStmt := cfg.StatementCoverage()
 	return fmt.Sprintf("Branch coverage: %d/%d  Statement Coverage: %d/%d\n", coveredBranch, totalBranch, coveredStmt, totalStmt)
+}
+
+func (cfg *CFG) SlotCoverage() SlotCoverage {
+	var (
+		sstoreCover = 0
+		sloadCover  = 0
+	)
+
+	for _, block := range cfg.Blocks {
+		for _, stmt := range block.Stmt {
+			if stmt.sstoreVisit > 0 {
+				sstoreCover++
+			}
+			if stmt.sloadVisit > 0 {
+				sloadCover++
+			}
+		}
+	}
+	cfg.slotCoverage.SLOADCover = sloadCover
+	cfg.slotCoverage.SSTORECover = sstoreCover
+	return cfg.slotCoverage
 }
 
 // StatementCoverage returns the number of statements covered and total potential statements.
@@ -306,6 +369,12 @@ func (cfg *CFG) visit(pc uint64) {
 	for _, block := range cfg.Blocks {
 		for _, stmt := range block.Stmt {
 			if stmt.pc == pc {
+				if stmt.op == vm.SLOAD {
+					stmt.sloadVisit++
+				}
+				if stmt.op == vm.SSTORE {
+					stmt.sstoreVisit++
+				}
 				block.Live = true
 				stmt.live = true
 				break

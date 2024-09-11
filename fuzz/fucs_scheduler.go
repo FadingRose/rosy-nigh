@@ -26,9 +26,10 @@ func (scheduler *FuncsScheduler) GetFucsSequence() []abi.Method {
 	methods := func() []abi.Method {
 		var ret []abi.Method
 		for _, method := range scheduler.methods {
-			if method.Name == "" {
+			if method.Name == "" || method.StateMutability == "view" {
 				continue
 			}
+
 			ret = append(ret, method)
 		}
 		return ret

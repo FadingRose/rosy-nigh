@@ -204,6 +204,8 @@ func execute(contract *Contract, debug bool) error {
 
 	fmt.Println(host.Oracle.HumanReport())
 
+	fmt.Println(host.CFG.String())
+
 	return nil
 }
 
@@ -231,5 +233,5 @@ func (s summary) string() string {
 		funcCoverageStr += fmt.Sprintf("|->%s: %d/%d\n", name, coverage[0], coverage[1])
 	}
 
-	return fmt.Sprintf(">FunctionBranchCoverage: %v\n> CFGCoverage: %s> Errors:\n%v", funcCoverageStr, s.CFGCoverage, errStr)
+	return fmt.Sprintf("> FunctionBranchCoverage:\n%v\n> CFGCoverage: %s> Errors:\n%v", funcCoverageStr, s.CFGCoverage, errStr)
 }
