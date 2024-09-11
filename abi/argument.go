@@ -34,8 +34,17 @@ type ArgIndex struct {
 	Val      interface{}
 }
 
+// TODO: Consider use same struct present this, this must adapt to mutator's vaults, see mutator/mutator.go:213
+func (ai ArgIndex) BindName() string {
+	return fmt.Sprintf("%s:%s,%s", ai.Method, ai.Type, ai.Name)
+}
+
+func (ai ArgIndex) BindType() string {
+	return ai.Type
+}
+
 func (ai ArgIndex) String() string {
-	return fmt.Sprintf("Contract: %s, Method: %s, Type: %s, Name: %s, Offset: %d, Size: %d, Val: %v", ai.Contract, ai.Method, ai.Type, ai.Name, ai.Offset, ai.Size, ai.Val)
+	return fmt.Sprintf("Contract: %s, Method: %s, Type: %s, Name: %s, Offset: %d, Size: %d, Val: 0x%x(%v)", ai.Contract, ai.Method, ai.Type, ai.Name, ai.Offset, ai.Size, ai.Val, ai.Val)
 }
 
 // Argument holds the name of the argument and the corresponding type.
@@ -50,7 +59,7 @@ type Argument struct {
 
 // Impl ArgumentABI interface
 func (arg Argument) ArguemntName() string {
-	return arg.Type.String() + "_" + arg.Name
+	return arg.Type.String() + "," + arg.Name
 }
 
 func (arg Argument) ArgumentType() string {

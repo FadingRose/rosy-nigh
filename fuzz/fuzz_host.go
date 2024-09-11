@@ -9,6 +9,7 @@ import (
 	"fadingrose/rosy-nigh/core/vm"
 	"fadingrose/rosy-nigh/log"
 	"fadingrose/rosy-nigh/mutator"
+	"fadingrose/rosy-nigh/oracle"
 	"fadingrose/rosy-nigh/smt"
 	"fmt"
 	"math/big"
@@ -23,14 +24,21 @@ import (
 type Mutator interface {
 	GenerateArgs(abi.Method) ([]interface{}, []abi.Argument, []mutator.Seed)
 	AddSolution(vm.RegKey, string)
+	String() string
 }
 
 type Solver interface {
 	SolveJumpIcondition(vm.RegKey) (string, bool)
+	AddExclusion(name string, val *big.Int)
 }
 
 type Scheduler interface {
 	GetFucsSequence() []abi.Method
+}
+
+type Oracle interface {
+	HumanReport() string
+	DivideZeroCheck(model string)
 }
 
 type FuzzHost struct {
@@ -45,6 +53,7 @@ type FuzzHost struct {
 	Mutator
 	Solver
 	Scheduler // FunctionScheduler
+	Oracle
 
 	Target *Contract
 
@@ -62,6 +71,7 @@ func NewFuzzHost(target *Contract, statedb *state.StateDB, blockCtx vm.BlockCont
 	mutator := mutator.NewMutator(target.ABI)
 	solver := smt.NewSolver()
 	scheduler := NewScheduler(target.ABI)
+	oracle := oracle.NewOracleHost()
 	// cfg := cfg.NewCFG(target.CreationBin)
 	return &FuzzHost{
 		StateDB:      statedb,
@@ -76,6 +86,7 @@ func NewFuzzHost(target *Contract, statedb *state.StateDB, blockCtx vm.BlockCont
 		Target:    target,
 		Solver:    solver,
 		Scheduler: scheduler,
+		Oracle:    oracle,
 
 		CFG:         nil,
 		runtimeCode: make([]byte, 0),
@@ -141,13 +152,13 @@ func (host *FuzzHost) RunForDeployOnchain() {
 		host.DeployAt = result.ContractAddr
 		host.runtimeCode = result.ReturnData
 		host.CFG = cfg.NewCFG(host.runtimeCode)
-
 		log.Info(fmt.Sprintf("deploy success at %s", host.DeployAt.Hex()))
 	} else {
 		log.Warn("Failed: ", "err", host.Err, "name", host.Target.Name)
 	}
 }
 
+// WARN: Deprecated
 func (host *FuzzHost) RunForDeploy() {
 	nonce := host.StateDB.GetNonce(host.SenderAddress)
 	amount := big.NewInt(0)
@@ -248,7 +259,7 @@ func (host *FuzzHost) RunForDeploy() {
 		// in RegKeyList(), regpool will rebuild itself
 		regList = host.evm.SymbolicPool.RegKeyList()
 		host.CFG.Update(regList)
-		host.wrapCandidates(argList, regList)
+		// host.wrapCandidates(argList, regList)
 
 		log.Debug(host.CFG.String())
 
@@ -262,7 +273,8 @@ func (host *FuzzHost) RunForDeploy() {
 	}
 }
 
-func (host *FuzzHost) FuzzOnce(method abi.Method) {
+func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCovered int, funcTotal int, fzerr error) {
+	// 0. Generate Sender's receive()
 	// 1. Generate parameters
 	//    1.a Create ArgIndexList for params
 	// 2. Pack it into a transaction and sign it to get a Message
@@ -284,9 +296,12 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) {
 		gaspool  = core.GasPool(gasLimit)
 		argList  []abi.ArgIndex
 		regList  []vm.RegKey
+		receiver = SafeReceiver()
 	)
 
-	args, params, _ := host.Mutator.GenerateArgs(method)
+	host.registReceiver(receiver)
+
+	args, params, seeds := host.Mutator.GenerateArgs(method)
 	// 1.a Create ArgIndexList for params
 	offset := uint64(0x4) // the fisrt 4 bytes are method ID, args start from 4 bytes
 	argListToString := func(a []abi.ArgIndex) string {
@@ -315,7 +330,7 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) {
 	data, err := host.Target.ABI.Pack(method.Name, args...)
 	if err != nil {
 		log.Warn("Failed to pack data: ", "err", err)
-		return
+		return nil, 0, 0, err
 	}
 	// NOTE:argsdata := data[4:], data = method.ID + args
 
@@ -349,17 +364,38 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) {
 		host.Err = result.Err
 	}
 
+	// if host.Err != nil , drop seed, otherwise increase priority
+	if host.Err != nil {
+		for _, seed := range seeds {
+			name, val := seed.Drop()
+			host.Solver.AddExclusion(name, val)
+		}
+	} else {
+		for _, seed := range seeds {
+			name, val := seed.IncreasePriority()
+			host.Solver.AddExclusion(name, val)
+		}
+	}
+
 	// 5.a 5.b rebuild and update CFG
 	// in RegKeyList(), regpool will rebuild itself
+	regList = host.evm.SymbolicPool.RegKeyList()
+	host.CFG.Update(regList)
 
-	if result.Failed() {
+	runtimePath = host.CFG.ExtractPath(regList)
 
-		regList = host.evm.SymbolicPool.RegKeyList()
-		host.CFG.Update(regList)
-		host.wrapCandidates(argList, regList)
+	// NOTE: if flag is True, it means all the solvable branch for the method has been covered
+	// solvable: see wrapCandidates, ingeneral, after we expand a JUMPI, not all the BASE value source can be symbolized
+	_, funcCovered, funcTotal = host.wrapCandidates(argList, regList, runtimePath)
+	return runtimePath, funcCovered, funcTotal, nil
 
-		log.Debug(host.CFG.String())
-	}
+	// // fmt.Printf("runtimePath: %s\n coverage: %s\n", runtimePath.String(), host.CFG.StringCoverage())
+	// if host.CFG.PathDict.IsNewPathDiscovered(runtimePath) {
+	// 	// fmt.Printf("new path discovered\n")
+	// } else {
+	// 	// fmt.Printf("reluctant path detected\n")
+	// }
+	//
 }
 
 func PackTxConstructor(abi abi.ABI, code []byte, args ...interface{}) ([]byte, error) {
@@ -378,7 +414,7 @@ func (host *FuzzHost) Debug() {
 	host.evm.SymbolicPool.Debug()
 }
 
-func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey) []vm.RegKey {
+func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey, runtimePath *cfg.Path) ([]vm.RegKey, int, int) {
 	// this is for create function
 	isBind := func(rk vm.RegKey) (abi.ArgIndex, bool) {
 		for _, arg := range argList {
@@ -392,6 +428,7 @@ func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey
 					dec = rk.Instance().Data.Dec()
 					val = fmt.Sprintf("%v", arg.Val)
 				)
+
 				hex = strings.ToUpper(hex)
 				val = strings.ToUpper(val)
 
@@ -399,30 +436,55 @@ func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey
 				if hex != val && dec != val {
 					log.Warn(fmt.Sprintf("Reg bind but value Mismatch: got %s(%s), want %s(%s)", hex, dec, val, arg.Name))
 				}
+
+				rk.Instance().ArgIndex = &arg
 				return arg, true
 			}
 		}
 		return abi.ArgIndex{}, false
 	}
 
-	var candidates []vm.RegKey
+	var (
+		candidates               []vm.RegKey
+		totalFuncBranchCoverage  = 0
+		coverdFuncBranchCoverage = 0
+	)
 	for _, rk := range regList {
-		if rk.OpCode() == vm.JUMPI || rk.OpCode() == vm.GAS {
+		if rk.OpCode() == vm.JUMPI {
 			relies := rk.Relies()
-			log.Debug(fmt.Sprintf("\n%s", rk.Expand()))
+
+			// NOTE: for now, we only impl branch coverage
 			for _, relie := range relies {
 				// log.Debug(fmt.Sprintf("relies: %s <- %s", relie.OpCode(), relie.IndexString()))
 				if _, ok := isBind(relie); ok {
+					coverd, total := host.CFG.BranchCoverageLine(rk.PC())
+					// fmt.Printf("Branch coverage at %d: %d/%d\n", rk.PC(), coverd, total)
+					totalFuncBranchCoverage += total
+					coverdFuncBranchCoverage += coverd
+					if coverd == total {
+						continue
+					}
 					candidates = append(candidates, rk)
+					// rk.Instance().ArgIndex = &index
 				}
 			}
 		}
 	}
 
 	log.Debug(fmt.Sprintf("candidate size: %d", len(candidates)))
-	// TODO:collect all the JUMPI, expand it, if there is a bind in the collection, send it to SMT
+	// DONE:collect all the JUMPI, expand it, if there is a bind in the collection, send it to SMT
+
 	for _, candidate := range candidates {
-		host.Solver.SolveJumpIcondition(candidate)
+		log.Debug(fmt.Sprintf("\n%s", candidate.Expand()))
+		if model, satisfied := host.Solver.SolveJumpIcondition(candidate); satisfied {
+			host.Oracle.DivideZeroCheck(model)
+			host.Mutator.AddSolution(candidate, model)
+		}
 	}
-	return candidates
+	return candidates, coverdFuncBranchCoverage, totalFuncBranchCoverage
+}
+
+// host.registReceiver(receiver)
+func (host *FuzzHost) registReceiver(receiver []byte) {
+	host.StateDB.SetCode(host.SenderAddress, receiver)
 }

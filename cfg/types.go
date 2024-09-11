@@ -3,6 +3,7 @@ package cfg
 import (
 	"fadingrose/rosy-nigh/core/asm"
 	"fadingrose/rosy-nigh/core/vm"
+	"fadingrose/rosy-nigh/log"
 	"fmt"
 	"strings"
 )
@@ -164,7 +165,10 @@ func isLeadingEnd(op vm.OpCode) bool {
 }
 
 type CFG struct {
-	Blocks []*Block // blocks[0] is entry; order otherwise undefined
+	Blocks   []*Block // blocks[0] is entry; order otherwise undefined
+	PathDict *PathDict
+
+	blockMap map[uint64]*Block
 }
 
 func NewCFG(bytecode []byte) *CFG {
@@ -173,6 +177,7 @@ func NewCFG(bytecode []byte) *CFG {
 	cur := newBlock(0)
 	cur.Live = true // start collect statements from root
 
+	blockmap := make(map[uint64]*Block)
 	it := asm.NewInstructionIterator(bytecode)
 	for it.Next() {
 		cur.appendStmt(&instruction{
@@ -183,14 +188,22 @@ func NewCFG(bytecode []byte) *CFG {
 			JMPBranch:  make(JMPBranch),
 			JMPIBranch: make(JMPIBranch),
 		})
+
 		if isLeadingEnd(it.Op()) {
 			idx := cur.Index + 1
 			blocks = append(blocks, cur)
 			cur = newBlock(idx)
 		}
+
+		blockmap[it.PC()] = cur
 	}
 
-	return &CFG{Blocks: blocks}
+	return &CFG{
+		Blocks:   blocks,
+		PathDict: NewPathDict(),
+
+		blockMap: blockmap,
+	}
 }
 
 func (cfg *CFG) String() string {
@@ -199,15 +212,23 @@ func (cfg *CFG) String() string {
 		coverage string
 	)
 
-	coveredBranch, totalBranch := cfg.BranchCoverage()
-	coveredStmt, totalStmt := cfg.StatementCoverage()
-	coverage = fmt.Sprintf("Branch coverage: %d/%d  Statement Coverage: %d/%d\n", coveredBranch, totalBranch, coveredStmt, totalStmt)
+	// coveredBranch, totalBranch := cfg.BranchCoverage()
+	// coveredStmt, totalStmt := cfg.StatementCoverage()
+	// coverage = fmt.Sprintf("Branch coverage: %d/%d  Statement Coverage: %d/%d\n", coveredBranch, totalBranch, coveredStmt, totalStmt)
+	coverage = cfg.CoverageString()
 	for _, block := range cfg.Blocks {
 		blocks += fmt.Sprintf("%s\n", block.String())
 	}
 	return fmt.Sprintf("CFG:\n%s%s", coverage, blocks)
 }
 
+func (cfg *CFG) CoverageString() string {
+	coveredBranch, totalBranch := cfg.BranchCoverage()
+	coveredStmt, totalStmt := cfg.StatementCoverage()
+	return fmt.Sprintf("Branch coverage: %d/%d  Statement Coverage: %d/%d\n", coveredBranch, totalBranch, coveredStmt, totalStmt)
+}
+
+// Update updates the CFG with the given list of register keys.
 func (cfg *CFG) Update(reglist []vm.RegKey) {
 	for _, key := range reglist {
 		var (
@@ -227,6 +248,13 @@ func (cfg *CFG) Update(reglist []vm.RegKey) {
 	}
 }
 
+func (cfg *CFG) StringCoverage() string {
+	coveredBranch, totalBranch := cfg.BranchCoverage()
+	coveredStmt, totalStmt := cfg.StatementCoverage()
+	return fmt.Sprintf("Branch coverage: %d/%d  Statement Coverage: %d/%d\n", coveredBranch, totalBranch, coveredStmt, totalStmt)
+}
+
+// StatementCoverage returns the number of statements covered and total potential statements.
 func (cfg *CFG) StatementCoverage() (int, int) {
 	var (
 		covered = 0
@@ -243,6 +271,11 @@ func (cfg *CFG) StatementCoverage() (int, int) {
 	return covered, total
 }
 
+func (cfg *CFG) BranchCoverageLine(pc uint64) (int, int) {
+	stmt := cfg.pcToStmt(pc)
+	return stmt.BranchCoverage()
+}
+
 func (cfg *CFG) BranchCoverage() (int, int) {
 	var (
 		covered = 0
@@ -256,6 +289,17 @@ func (cfg *CFG) BranchCoverage() (int, int) {
 		}
 	}
 	return covered, total
+}
+
+func (cfg *CFG) pcToStmt(pc uint64) *instruction {
+	for _, block := range cfg.Blocks {
+		for _, stmt := range block.Stmt {
+			if stmt.pc == pc {
+				return stmt
+			}
+		}
+	}
+	return nil
 }
 
 func (cfg *CFG) visit(pc uint64) {
@@ -298,4 +342,77 @@ func (cfg *CFG) visitJMPI(pc, dest, cond uint64) {
 			}
 		}
 	}
+}
+
+func (cfg *CFG) ExtractPath(reglist []vm.RegKey) *Path {
+	from_pc := uint64(0)
+
+	path := &Path{}
+
+	start_pc := reglist[0].PC()
+	if bb, exists := cfg.blockMap[start_pc]; exists {
+		path.Start = bb
+		path.Start_PC = start_pc
+	}
+
+	cur := start_pc
+
+	for i, key := range reglist {
+		var (
+			op   = key.OpCode()
+			pc   = key.PC()
+			dest = key.Dest()
+			cond = key.Cond()
+		)
+		if i == len(reglist)-1 {
+			path.Terminate_PC = cur
+			if bb, exists := cfg.blockMap[cur]; exists {
+				path.Terminate = bb
+			} else {
+				path.Terminate = nil
+			}
+			break
+		}
+		// make sure the _to is not nil
+		switch op {
+		case vm.JUMP:
+			// to_pc := reglist[i+1].PC()
+			to_pc := dest
+
+			if bb, exists := cfg.blockMap[from_pc]; exists {
+				reason := JUMP
+				path.AddCheckpoint(from_pc, bb, reason, to_pc, cfg.blockMap[pc])
+			} else {
+				reason := JUMPI_FALSE
+				path.AddCheckpoint(from_pc, nil, reason, to_pc, nil)
+			}
+
+			cur = from_pc
+			from_pc = to_pc
+
+		case vm.JUMPI:
+			// to_pc := reglist[i+1].PC()
+
+			var reason JUMP_TYPE
+			if cond == uint64(0) {
+				// FALSE - BRANCH
+				reason = JUMPI_FALSE
+			} else {
+				reason = JUMPI_TRUE
+			}
+
+			to_pc := dest
+
+			if bb, exists := cfg.blockMap[from_pc]; exists {
+				path.AddCheckpoint(from_pc, bb, reason, to_pc, cfg.blockMap[pc])
+			} else {
+				path.AddCheckpoint(from_pc, nil, reason, to_pc, nil)
+			}
+		default:
+			continue
+		}
+	}
+
+	log.Info("Extracted Path: %s", path)
+	return path
 }

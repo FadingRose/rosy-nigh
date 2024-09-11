@@ -3,8 +3,10 @@ package mutator
 import (
 	"fadingrose/rosy-nigh/abi"
 	"fadingrose/rosy-nigh/core/vm"
+	"fadingrose/rosy-nigh/log"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -244,6 +246,149 @@ func (m *Mutator) GenerateArgs(me abi.Method) ([]interface{}, []abi.Argument, []
 	return args, inputs, seeds
 }
 
+type SolutionType int // 0: method input 1: magic number
+
+const (
+	MethodInput SolutionType = iota
+	MagicNumber
+)
+
+type Solution struct {
+	MethodName   string
+	ArgumentName string
+
+	MagicNumber string
+
+	Value string
+
+	SolutionType
+}
+
 // Impl Mutator Interface
 func (m *Mutator) AddSolution(rk vm.RegKey, solution string) {
+	var info strings.Builder
+
+	info.WriteString("\n * [Mutator] * Receive Solution\n")
+	solutions := m.parseSolution(solution)
+	for _, sol := range solutions {
+		// fmt.Printf("method: %s, arg: %s, value: %s\n", sol.MethodName, sol.ArgumentName, sol.Value)
+		if sol.SolutionType == MagicNumber {
+			info.WriteString(fmt.Sprintf(" * [Mutator] %s <- %s\n", sol.MagicNumber, sol.Value))
+		} else {
+			info.WriteString(
+				fmt.Sprintf(
+					" * [Mutator] Method: %s, Arg: %s, Value: %s\n",
+					sol.MethodName,
+					sol.ArgumentName,
+					sol.Value,
+				),
+			)
+		}
+		m.addSolution(rk, sol)
+	}
+	info.WriteString(" * [Mutator] * End of Solution\n\n")
+
+	log.Info(info.String())
+}
+
+func (m *Mutator) addSolution(rk vm.RegKey, solution Solution) {
+	if solution.SolutionType == MagicNumber {
+		log.Info(fmt.Sprintf("Inherit MagicVault %s : %s\n", solution.MagicNumber, solution.Value))
+		m.MagicNumberVaults[solution.MagicNumber].Inherit(solution.Value)
+		return
+	}
+
+	methodName := solution.MethodName
+	argumentName := solution.ArgumentName
+	value := solution.Value
+
+	vault := m.MethodVaults[methodName][argumentName]
+
+	if vault == nil {
+		_info := fmt.Sprintf("Vault is nil for  %s:%s", methodName, argumentName)
+		panic(_info)
+	}
+
+	// TODO: check whether seed creation fails
+	vault.Inherit(value)
+}
+
+// TODO: report potential divide by zero error
+func (m *Mutator) parseSolution(pure string) []Solution {
+	ret := make([]Solution, 0)
+
+	// parse solution string
+	// <methodname>:<type>_<argumentname> -> <value>
+	// :uint256_x -> 1
+	// TODO: :uint256,x -> 1
+	// <MagicNumber> -> <Value>
+	ss := strings.Split(pure, "\n")
+
+	for _, s := range ss {
+		if s == "" {
+			continue
+		}
+
+		sol := strings.Split(s, " -> ")
+
+		if len(sol) != 2 {
+			log.Warn("invalid solution format" + s)
+			continue
+		}
+
+		if sol[1] == "{" {
+			log.Warn("invalid solution format" + s)
+			continue
+		}
+
+		method := ""
+		arg := ""
+
+		if sol[0][0] == ':' {
+			// constructor
+			arg = sol[0][1:]
+		} else {
+			_ss := strings.Split(sol[0], ":")
+			if len(_ss) != 2 {
+				// MAGIC NUMBER
+
+				ret = append(ret, Solution{
+					MethodName:   "",
+					ArgumentName: "",
+					Value:        sol[1],
+					MagicNumber:  sol[0],
+					SolutionType: MagicNumber,
+				})
+				continue
+			}
+
+			method = _ss[0]
+			arg = _ss[1]
+		}
+
+		ret = append(ret, Solution{
+			MethodName:   method,
+			ArgumentName: arg,
+			Value:        sol[1],
+			MagicNumber:  "",
+			SolutionType: MethodInput,
+		})
+
+	}
+
+	return ret
+}
+
+func (m *Mutator) String() string {
+	var builder strings.Builder
+	for methodName, mv := range m.MethodVaults {
+		builder.WriteString(fmt.Sprintf("Method: %s\n", methodName))
+		for argName, v := range mv {
+			builder.WriteString(fmt.Sprintf("    Arg: %s\n", argName))
+			builder.WriteString(v.String())
+			builder.WriteString("\n")
+		}
+		builder.WriteString("\n")
+	}
+	return builder.String()
 }

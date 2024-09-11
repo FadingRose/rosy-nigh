@@ -304,7 +304,7 @@ func escapeMessage(s string) string {
 	needsQuoting := false
 	for _, r := range s {
 		// Allow CR/LF/TAB. This is to make multi-line messages work.
-		if r == '\r' || r == '\n' || r == '\t' || r == '└' || r == '─' {
+		if r == '\r' || r == '\n' || r == '\t' || r == '└' || r == '─' || r == '=' {
 			continue
 		}
 		// We quote everything below <space> (0x20) and above~ (0x7E),

@@ -43,26 +43,6 @@ func (v *Vault) InitVault(_base Seed, _name string) {
 	v.name = _name
 }
 
-// WARNING: THIS METHOD MUST CHANGE
-// Transfer this to InheritSeed
-// When a Vault init, it hold a BaseSeed
-// A The Base Seed holds these method
-// 1. Inherit(val string)
-// And when a BaseSeed creation, two help function must injected
-// 1.a random
-//
-//	if we wanna add more Seed without any input
-//
-// .    use Seed.random() inherits new Seed
-//
-// 1.b parse
-// .   we wanna hide all the details of a SeedValue
-// .   use parse define 'how to convert a string to Seed"
-//
-// 1.c hash
-//
-//	a seed can return a hash by calling seed.Hash() <- value type
-
 func (v *Vault) Inherit(val string) {
 	// Ensure the seed is unique by checking its hash against the selectHistory map
 	if _seed, err := v.baseSeed.Parse(val); err != nil {
@@ -82,7 +62,8 @@ func (v *Vault) Randomize(n int) {
 
 func (v *Vault) GetSeed() Seed {
 	if len(v.Seeds) == 0 {
-		return v.baseSeed
+		v.Randomize(1)
+		// return v.baseSeed
 	}
 
 	// ignores all the priority == -1000
@@ -120,5 +101,33 @@ func (v *Vault) Format() string {
 	for _, s := range v.Seeds {
 		ret.WriteString(s.Format() + "\n")
 	}
+	return ret.String()
+}
+
+func (v *Vault) String() string {
+	if len(v.Seeds) == 0 {
+		return v.baseSeed.Format()
+	}
+
+	// ignores all the priority == -1000
+
+	// Sort by priority
+	sort.Slice(v.Seeds, func(i, j int) bool {
+		return v.Seeds[i].Priority() > v.Seeds[j].Priority()
+	})
+
+	var ret strings.Builder
+	cutoff := 5
+	cutoffStr := "..."
+	if len(v.Seeds) < cutoff {
+		cutoffStr = ""
+	}
+
+	for _, s := range v.Seeds {
+		ret.WriteString(s.Format() + "\n")
+	}
+
+	ret.WriteString(cutoffStr)
+
 	return ret.String()
 }

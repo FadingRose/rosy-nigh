@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"errors"
+	"fadingrose/rosy-nigh/abi"
 	"fadingrose/rosy-nigh/log"
 	"fmt"
 	"strings"
@@ -16,6 +18,7 @@ type Reg struct {
 	pushbackSize int
 	op           OpCode
 	Data         uint256.Int
+
 	//[R4, R3, R2, R1, R0, M, L, me
 	// stack parameters
 	R4 *Reg `json:"r4"` //-7#stack
@@ -33,8 +36,10 @@ type Reg struct {
 	dest uint64
 	cond uint64
 
-	// for MLOAD
+	// for MLOAD | CallDataLoad
 	offset uint64
+
+	ArgIndex *abi.ArgIndex
 }
 
 func newReg(index [3]uint64, op OpCode, paramSize int, pushbackSize int) *Reg {
@@ -47,12 +52,20 @@ func newReg(index [3]uint64, op OpCode, paramSize int, pushbackSize int) *Reg {
 	return &r
 }
 
+func (r *Reg) Name() string {
+	return r.name()
+}
+
 func (r *Reg) name() string {
-	return fmt.Sprintf("[%d,%d,%d]", r.index[0], r.index[1], r.index[2])
+	return fmt.Sprintf("Reg#[%d,%d,%d]", r.index[0], r.index[1], r.index[2])
 }
 
 func (r *Reg) pc() uint64 {
 	return r.index[1]
+}
+
+func (r *Reg) OpCode() OpCode {
+	return r.op
 }
 
 func (r *Reg) RegKey() RegKey {
@@ -236,7 +249,10 @@ func (r *Reg) setupParams(params []RegKey) {
 	}
 
 	if r.op == CALLDATALOAD {
-		r.offset = params[0].reg.Data.Uint64() + uint64(0x04)
+		// skip function selector
+		if params[0].reg.Data.Uint64() >= uint64(0x04) {
+			r.offset = params[0].reg.Data.Uint64()
+		}
 	}
 
 	set := func(i int, reg *Reg) {
@@ -304,4 +320,28 @@ func (r *Reg) itor() []*Reg {
 		}
 	}
 	return ret
+}
+
+func (r *Reg) GetBindName() (string, error) {
+	if r.ArgIndex != nil {
+		return r.ArgIndex.BindName(), nil
+	}
+
+	if r.cp != nil {
+		return r.cp.GetBindName()
+	}
+
+	return "", errors.New("reg ont bound with any input")
+}
+
+func (r *Reg) GetBindType() (string, error) {
+	if r.ArgIndex != nil {
+		return r.ArgIndex.BindType(), nil
+	}
+
+	if r.cp != nil {
+		return r.cp.GetBindType()
+	}
+
+	return "", errors.New("reg ont bound with any input")
 }

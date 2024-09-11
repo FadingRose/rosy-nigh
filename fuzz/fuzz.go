@@ -1,6 +1,7 @@
 package fuzz
 
 import (
+	"context"
 	"fadingrose/rosy-nigh/abi"
 	"fadingrose/rosy-nigh/core"
 	"fadingrose/rosy-nigh/core/state"
@@ -9,6 +10,8 @@ import (
 	"fadingrose/rosy-nigh/onchain"
 	"fmt"
 	"math/big"
+	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/params"
@@ -133,6 +136,13 @@ func Execute(contractFolder string, debug bool) error {
 }
 
 // NOTE: Entry point for a fuzzing task
+//  0. set timeout, deploy
+//  1. get funcs sequence from scheduler
+//  2. for each func in funcs, run fuzz
+//  3. summary:
+//     3.a function branch coverage
+//     3.b total branch coverage and statement coverage
+//     3.c error
 func execute(contract *Contract, debug bool) error {
 	var host *FuzzHost
 	defer func() {
@@ -145,18 +155,81 @@ func execute(contract *Contract, debug bool) error {
 	host = NewFuzzHost(contract, statedb, blockCtx, chainConfig, config)
 
 	log.Info("Fuzzing contract: ", "name", contract.Name)
-	// host.RunForDeploy()
 	host.RunForDeployOnchain()
 
-	funcs := host.Scheduler.GetFucsSequence()
+	timeout := time.Duration(10) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	for _, f := range funcs {
-		fmt.Printf("running %s\n", f.Name)
-		host.FuzzOnce(f)
-		if host.Err != nil {
-			break
+	sum := newSummary()
+
+	var wg sync.WaitGroup
+	// Fuzzing
+	wg.Add(1)
+	// TODO: thoughout
+	// success call per second
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				wg.Done()
+				return
+			default:
+				func() {
+					funcs := host.Scheduler.GetFucsSequence()
+					for _, f := range funcs {
+						_, funcCover, funcTotal, err := host.FuzzOnce(f)
+						if err != nil {
+							sum.Errors = append(sum.Errors, err.Error())
+							break
+						} else {
+							sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
+						}
+						if host.Err != nil {
+							sum.Errors = append(sum.Errors, host.Err.Error())
+							host.Err = nil
+							break
+						}
+					}
+				}()
+			}
 		}
-	}
+	}()
+
+	wg.Wait()
+
+	sum.CFGCoverage = host.CFG.CoverageString()
+
+	fmt.Println(sum.string())
+
+	fmt.Println(host.Oracle.HumanReport())
 
 	return nil
+}
+
+type summary struct {
+	FunctionBranchCoverage map[string][2]int
+	CFGCoverage            string
+	Errors                 []string
+}
+
+func newSummary() summary {
+	return summary{
+		FunctionBranchCoverage: make(map[string][2]int),
+		CFGCoverage:            "",
+		Errors:                 make([]string, 0),
+	}
+}
+
+func (s summary) string() string {
+	errStr := ""
+	for _, err := range s.Errors {
+		errStr += "|->" + err + "\n"
+	}
+	funcCoverageStr := ""
+	for name, coverage := range s.FunctionBranchCoverage {
+		funcCoverageStr += fmt.Sprintf("|->%s: %d/%d\n", name, coverage[0], coverage[1])
+	}
+
+	return fmt.Sprintf(">FunctionBranchCoverage: %v\n> CFGCoverage: %s> Errors:\n%v", funcCoverageStr, s.CFGCoverage, errStr)
 }

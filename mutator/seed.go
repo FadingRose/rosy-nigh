@@ -11,7 +11,7 @@ import (
 // TODO: Provies a 'WRiteBack' Method for SMT solver
 // Vault holds a set of seeds can be use
 type Seed interface {
-	IncreasePriority()
+	IncreasePriority() (string, *big.Int)
 	Priority() int
 	DecreasePriority()
 
@@ -78,8 +78,11 @@ func (si *SeedImpl[SV]) Val() interface{} {
 	return si.val
 }
 
-func (si *SeedImpl[SV]) IncreasePriority() {
+func (si *SeedImpl[SV]) IncreasePriority() (string, *big.Int) {
 	si.priority++
+	name := si.vault.Name()
+	ret := toBigInt[SV](si.val)
+	return name, ret
 }
 
 func (si *SeedImpl[SV]) Priority() int {
