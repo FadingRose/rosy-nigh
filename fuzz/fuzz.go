@@ -164,6 +164,16 @@ func execute(contract *Contract, debug bool) error {
 	sum := newSummary()
 
 	var wg sync.WaitGroup
+
+	var (
+		throughputTotal    uint64
+		throughputSuccess  uint64
+		throughputFail     uint64
+		throughputMeanning uint64
+	)
+
+	start := time.Now()
+
 	// Fuzzing
 	wg.Add(1)
 	// TODO: thoughout
@@ -178,18 +188,27 @@ func execute(contract *Contract, debug bool) error {
 				func() {
 					funcs := host.Scheduler.GetFucsSequence()
 					for _, f := range funcs {
+						throughputTotal++
+
 						_, funcCover, funcTotal, err := host.FuzzOnce(f)
+
 						if err != nil {
-							sum.Errors = append(sum.Errors, err.Error())
+							// sum.Errors = append(sum.Errors, err.Error())
+							sum.Errors = append(sum.Errors, [2]string{"!" + f.Name, err.Error()})
 							break
 						} else {
 							sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
 						}
+
 						if host.Err != nil {
-							sum.Errors = append(sum.Errors, host.Err.Error())
+							sum.Errors = append(sum.Errors, [2]string{f.Name, host.Err.Error()})
 							host.Err = nil
+							throughputFail++
 							break
 						}
+						// TODO: measure the meaning value
+						throughputMeanning++
+						throughputSuccess++
 					}
 				}()
 			}
@@ -197,6 +216,15 @@ func execute(contract *Contract, debug bool) error {
 	}()
 
 	wg.Wait()
+
+	duration := time.Since(start)
+	sum.Throughput = throughput{
+		total:    throughputTotal,
+		success:  throughputSuccess,
+		fail:     throughputFail,
+		meanning: throughputMeanning,
+		duration: duration,
+	}
 
 	sum.CFGCoverage = host.CFG.CoverageString()
 
@@ -209,29 +237,52 @@ func execute(contract *Contract, debug bool) error {
 	return nil
 }
 
+type throughput struct {
+	total    uint64 // total calls
+	success  uint64 // calls with Return
+	fail     uint64 // calls without Return, but Revert error
+	meanning uint64 // calls with Return, and reach the target
+
+	duration time.Duration
+}
+
 type summary struct {
 	FunctionBranchCoverage map[string][2]int
 	CFGCoverage            string
-	Errors                 []string
+	Errors                 [][2]string
+	Throughput             throughput
 }
 
 func newSummary() summary {
 	return summary{
 		FunctionBranchCoverage: make(map[string][2]int),
 		CFGCoverage:            "",
-		Errors:                 make([]string, 0),
+		Errors:                 make([][2]string, 0),
+		Throughput: throughput{
+			total:    0,
+			success:  0,
+			fail:     0,
+			meanning: 0,
+			duration: 0,
+		},
 	}
 }
 
 func (s summary) string() string {
 	errStr := ""
-	for _, err := range s.Errors {
-		errStr += "|->" + err + "\n"
+	for _, parts := range s.Errors {
+		errStr += "| " + parts[0] + "->" + parts[1] + "\n"
 	}
 	funcCoverageStr := ""
 	for name, coverage := range s.FunctionBranchCoverage {
 		funcCoverageStr += fmt.Sprintf("|->%s: %d/%d\n", name, coverage[0], coverage[1])
 	}
-
-	return fmt.Sprintf("> FunctionBranchCoverage:\n%v\n> CFGCoverage: %s> Errors:\n%v", funcCoverageStr, s.CFGCoverage, errStr)
+	throughputStr := ""
+	if s.Throughput.total > 0 {
+		totalQps := float64(s.Throughput.total) / s.Throughput.duration.Seconds()
+		sucQps := float64(s.Throughput.success) / s.Throughput.duration.Seconds()
+		meanQps := float64(s.Throughput.meanning) / s.Throughput.duration.Seconds()
+		throughputStr = fmt.Sprintf("|->Total: %d, Success: %d, Fail: %d, Meanning: %d\n|->QPS: %.2f, SuccessQPS: %.2f, MeanningQPS: %.2f\n", s.Throughput.total, s.Throughput.success, s.Throughput.fail, s.Throughput.meanning, totalQps, sucQps, meanQps)
+	}
+	return fmt.Sprintf("> Throughput:\n%s\n> FunctionBranchCoverage:\n%v\n> CFGCoverage: %s> Errors:\n%v", throughputStr, funcCoverageStr, s.CFGCoverage, errStr)
 }

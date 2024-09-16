@@ -18,7 +18,7 @@ func NewScheduler(abi abi.ABI) *FuncsScheduler {
 
 func (scheduler *FuncsScheduler) GetFucsSequence() []abi.Method {
 	// HACK: only return govWithdrawEther
-	// return []abi.Method{scheduler.methods["govWithdrawEther"], scheduler.methods["govWithdrawEther"], scheduler.methods["govWithdrawEther"]}
+	return []abi.Method{scheduler.methods["buyVip"], scheduler.methods["buyVip"], scheduler.methods["buyVip"]}
 
 	// TODO: use funcs scheduler algorithm replace this
 	n := rand.Intn(len(scheduler.methods))

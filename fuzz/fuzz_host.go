@@ -414,6 +414,7 @@ func (host *FuzzHost) Debug() {
 	host.evm.SymbolicPool.Debug()
 }
 
+// wrapCandidates is a function to collect all the JUMPI, expand it, if there is a bind in the collection, send it to SMT
 func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey, runtimePath *cfg.Path) ([]vm.RegKey, int, int) {
 	// this is for create function
 	isBind := func(rk vm.RegKey) (abi.ArgIndex, bool) {
@@ -465,7 +466,6 @@ func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey
 						continue
 					}
 					candidates = append(candidates, rk)
-					// rk.Instance().ArgIndex = &index
 				}
 			}
 		}
