@@ -28,6 +28,9 @@ import (
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+		// HACK: remove Gas SStore limit
+		return 0, nil
+
 		// If we fail the minimum gas availability invariant, fail (0)
 		if contract.Gas <= params.SstoreSentryGasEIP2200 {
 			return 0, errors.New("not enough gas for reentrancy sentry")

@@ -23,6 +23,7 @@ import (
 
 type Mutator interface {
 	GenerateArgs(abi.Method) ([]interface{}, []abi.Argument, []mutator.Seed)
+	GenerateCallValue() *big.Int
 	AddSolution(vm.RegKey, string)
 	String() string
 }
@@ -288,7 +289,7 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCo
 	var (
 		nonce    = host.StateDB.GetNonce(host.SenderAddress)
 		to       = host.DeployAt
-		amount   = big.NewInt(0)
+		amount   = host.Mutator.GenerateCallValue()
 		gasLimit = uint64(1000000)
 		gasPrice = big.NewInt(0)
 		signer   = types.MakeSigner(&host.ChainConfig, big.NewInt(0), 0)
@@ -324,7 +325,7 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCo
 			})
 		offset += uint64(params[i].Type.GetSize())
 	}
-	log.Debug(fmt.Sprintf("runs with args:\n%v", argListToString(argList)))
+	log.Debug(fmt.Sprintf("runs with args:\nmsg.value %s\n%v", amount.String(), argListToString(argList)))
 
 	// 2. Pack it into a transaction and sign it to get a Message
 	data, err := host.Target.ABI.Pack(method.Name, args...)
@@ -388,14 +389,6 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCo
 	// solvable: see wrapCandidates, ingeneral, after we expand a JUMPI, not all the BASE value source can be symbolized
 	_, funcCovered, funcTotal = host.wrapCandidates(argList, regList, runtimePath)
 	return runtimePath, funcCovered, funcTotal, nil
-
-	// // fmt.Printf("runtimePath: %s\n coverage: %s\n", runtimePath.String(), host.CFG.StringCoverage())
-	// if host.CFG.PathDict.IsNewPathDiscovered(runtimePath) {
-	// 	// fmt.Printf("new path discovered\n")
-	// } else {
-	// 	// fmt.Printf("reluctant path detected\n")
-	// }
-	//
 }
 
 func PackTxConstructor(abi abi.ABI, code []byte, args ...interface{}) ([]byte, error) {
@@ -418,10 +411,17 @@ func (host *FuzzHost) Debug() {
 func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey, runtimePath *cfg.Path) ([]vm.RegKey, int, int) {
 	// this is for create function
 	isBind := func(rk vm.RegKey) (abi.ArgIndex, bool) {
+		// Magic Reg
+		if rk.IsMagic() {
+			return abi.ArgIndex{}, true
+		}
+
+		// Bind Argument
 		for _, arg := range argList {
-			if rk.OpCode() != vm.MLOAD && rk.OpCode() != vm.CALLDATALOAD {
+			if rk.OpCode() != vm.MLOAD && rk.OpCode() != vm.CALLDATALOAD && rk.OpCode() != vm.CALLVALUE {
 				continue
 			}
+
 			if rk.Offset() == arg.Offset {
 				// Add verification for the value
 				var (
@@ -452,11 +452,13 @@ func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey
 	)
 	for _, rk := range regList {
 		if rk.OpCode() == vm.JUMPI {
+			// log.Debug(fmt.Sprintf("JUMPI\n%s\n", rk.Expand()))
 			relies := rk.Relies()
-
 			// NOTE: for now, we only impl branch coverage
 			for _, relie := range relies {
 				// log.Debug(fmt.Sprintf("relies: %s <- %s", relie.OpCode(), relie.IndexString()))
+
+				// bind argument
 				if _, ok := isBind(relie); ok {
 					coverd, total := host.CFG.BranchCoverageLine(rk.PC())
 					// fmt.Printf("Branch coverage at %d: %d/%d\n", rk.PC(), coverd, total)

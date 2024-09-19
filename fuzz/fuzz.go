@@ -157,7 +157,7 @@ func execute(contract *Contract, debug bool) error {
 	log.Info("Fuzzing contract: ", "name", contract.Name)
 	host.RunForDeployOnchain()
 
-	timeout := time.Duration(10) * time.Second
+	timeout := time.Duration(1) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 

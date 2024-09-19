@@ -48,10 +48,12 @@ func NewMutator(_abi abi.ABI) *Mutator {
 			_seed := NewSeedImpl[*big.Int](mv)
 			mv.baseSeed = _seed
 			mv.InitVault(_seed, string(magic))
+			mv.Inherit("0x0")
 		default:
 			fmt.Println("Unknown magic number")
 		}
 	}
+
 	// Method Vaults
 	_abi.Methods[""] = _abi.Constructor
 	for _, method := range _abi.Methods {
@@ -244,6 +246,13 @@ func (m *Mutator) GenerateArgs(me abi.Method) ([]interface{}, []abi.Argument, []
 	}
 
 	return args, inputs, seeds
+}
+
+func (m *Mutator) GenerateCallValue() *big.Int {
+	// fmt.Println(m.MagicNumberVaults[string(CallValue)].Format())
+	seed := m.MagicNumberVaults[string(CallValue)].GetSeed()
+	// fmt.Println("get seed value: ", seed.Val())
+	return seed.Val().(*big.Int)
 }
 
 type SolutionType int // 0: method input 1: magic number

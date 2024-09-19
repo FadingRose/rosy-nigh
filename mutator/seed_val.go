@@ -152,7 +152,6 @@ func random[SV SeedValue]() SV {
 	case *big.Int:
 		bigint := big.NewInt(rand.Int63())
 		zero.Set(reflect.ValueOf(bigint))
-
 	case bool:
 		b := rand.Intn(2) == 1
 		zero.SetBool(b)

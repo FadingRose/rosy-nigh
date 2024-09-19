@@ -79,6 +79,19 @@ func (r *Reg) Expand() string {
 	return r.expand(0)
 }
 
+func (r *Reg) IsMagic() bool {
+	mgops := []OpCode{
+		CALLVALUE,
+	}
+
+	for _, op := range mgops {
+		if r.op == op {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Reg) expand(depth int) string {
 	if depth > 1024 {
 		log.Warn("reg expand overflow, depth > 1024")

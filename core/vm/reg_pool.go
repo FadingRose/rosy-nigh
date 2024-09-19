@@ -45,6 +45,10 @@ func (rk *RegKey) Expand() string {
 	return rk.Instance().Expand()
 }
 
+func (rk *RegKey) IsMagic() bool {
+	return rk.Instance().IsMagic()
+}
+
 // Duplicate supports opcode DUP
 func (rk *RegKey) Duplicate() *RegKey {
 	return &RegKey{
