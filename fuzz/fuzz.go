@@ -3,6 +3,7 @@ package fuzz
 import (
 	"context"
 	"fadingrose/rosy-nigh/abi"
+	"fadingrose/rosy-nigh/cfg"
 	"fadingrose/rosy-nigh/core"
 	"fadingrose/rosy-nigh/core/state"
 	"fadingrose/rosy-nigh/core/vm"
@@ -157,11 +158,11 @@ func execute(contract *Contract, debug bool) error {
 	log.Info("Fuzzing contract: ", "name", contract.Name)
 	host.RunForDeployOnchain()
 
-	timeout := time.Duration(1) * time.Second
+	timeout := time.Duration(5) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	sum := newSummary()
+	sum := newSummary(host.Scheduler.GetSingleFuncList())
 
 	var wg sync.WaitGroup
 
@@ -174,7 +175,8 @@ func execute(contract *Contract, debug bool) error {
 
 	start := time.Now()
 
-	// Fuzzing
+	// NOTE: Stage 1 Single Functional Fuzzing
+	// This step try to fuzz each function, collect the coverage
 	wg.Add(1)
 	// TODO: thoughout
 	// success call per second
@@ -186,29 +188,102 @@ func execute(contract *Contract, debug bool) error {
 				return
 			default:
 				func() {
-					funcs := host.Scheduler.GetFucsSequence()
+					funcs := host.Scheduler.GetSingleFuncList()
 					for _, f := range funcs {
-						throughputTotal++
+						// NOTE: Loop for each function until timeout or reach full coverage
+						cnt := 0
+						for {
 
-						_, funcCover, funcTotal, err := host.FuzzOnce(f)
+							throughputTotal++
 
-						if err != nil {
-							// sum.Errors = append(sum.Errors, err.Error())
-							sum.Errors = append(sum.Errors, [2]string{"!" + f.Name, err.Error()})
-							break
-						} else {
-							sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
+							_, funcCover, funcTotal, err := host.FuzzOnce(f)
+
+							if err != nil {
+								sum.Errors = append(sum.Errors, [2]string{"!" + f.Name, err.Error()})
+								break
+							} else {
+								sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
+							}
+
+							if host.Err != nil {
+								sum.Errors = append(sum.Errors, [2]string{f.Name, host.Err.Error()})
+								host.Err = nil
+								throughputFail++
+								break
+							}
+							// TODO: measure the meaning value
+							throughputMeanning++
+							throughputSuccess++
+
+							if funcCover == funcTotal {
+								break
+							}
+
+							cnt++
+							if cnt > 100 {
+								break
+							}
+						}
+					}
+				}()
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// NOTE: Stage 2 Fuzzing with FuncSequence
+	wg.Add(1)
+	timeout2 := time.Duration(30) * time.Second
+	ctx2, cancel2 := context.WithTimeout(context.Background(), timeout2)
+	defer cancel2()
+
+	go func() {
+		for {
+			select {
+			case <-ctx2.Done():
+				wg.Done()
+				return
+			default:
+				func() {
+					funcs := host.Scheduler.GetFucsSequence()
+					fmt.Println("funcs: ", funcs)
+					// for a specific func sequence [A->B->C], assume that we have execute A and B, then we try to go through C
+					for _, f := range funcs {
+						retry := 10
+						halt := false
+
+						for retry > 0 {
+							throughputTotal++
+							_, funcCover, funcTotal, err := host.FuzzOnce(f)
+
+							// fmt.Println("fuzzing: ", f.Name, funcCover, funcTotal, err, host.Err)
+
+							if err == nil && host.Err == nil {
+								sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
+								halt = false
+								throughputSuccess++
+								throughputMeanning++
+								break
+							}
+
+							if err != nil {
+								sum.Errors = append(sum.Errors, [2]string{"!" + f.Name, err.Error()})
+							}
+
+							if host.Err != nil {
+								sum.Errors = append(sum.Errors, [2]string{f.Name, host.Err.Error()})
+								host.Err = nil
+								throughputFail++
+							}
+
+							retry--
 						}
 
-						if host.Err != nil {
-							sum.Errors = append(sum.Errors, [2]string{f.Name, host.Err.Error()})
-							host.Err = nil
-							throughputFail++
+						if halt {
+							// TODO: if this funcs sequence is NOT a good one, let Scheduler knows
 							break
 						}
-						// TODO: measure the meaning value
-						throughputMeanning++
-						throughputSuccess++
 					}
 				}()
 			}
@@ -227,6 +302,7 @@ func execute(contract *Contract, debug bool) error {
 	}
 
 	sum.CFGCoverage = host.CFG.CoverageString()
+	sum.FunctionAcceessList = host.CFG.AccessList()
 
 	fmt.Println(sum.string())
 
@@ -248,14 +324,24 @@ type throughput struct {
 
 type summary struct {
 	FunctionBranchCoverage map[string][2]int
+	FunctionAcceessList    map[string][]cfg.SlotAccess
 	CFGCoverage            string
 	Errors                 [][2]string
 	Throughput             throughput
 }
 
-func newSummary() summary {
+func newSummary(funcs []abi.Method) summary {
+	fbc := func() map[string][2]int {
+		ret := make(map[string][2]int)
+		for _, f := range funcs {
+			ret[f.Name] = [2]int{-1, 0}
+		}
+		return ret
+	}()
+
 	return summary{
-		FunctionBranchCoverage: make(map[string][2]int),
+		FunctionBranchCoverage: fbc,
+		FunctionAcceessList:    make(map[string][]cfg.SlotAccess),
 		CFGCoverage:            "",
 		Errors:                 make([][2]string, 0),
 		Throughput: throughput{
@@ -277,6 +363,20 @@ func (s summary) string() string {
 	for name, coverage := range s.FunctionBranchCoverage {
 		funcCoverageStr += fmt.Sprintf("|->%s: %d/%d\n", name, coverage[0], coverage[1])
 	}
+	funcSlotAccessStr := ""
+	for name, accessList := range s.FunctionAcceessList {
+		funcSlotAccessStr += "|->" + name + ":\n"
+		readlistStr := ""
+		writeListStr := ""
+		for _, access := range accessList {
+			if access.AccessType == cfg.Read {
+				readlistStr += fmt.Sprintf("|->%s\n", access.String())
+			} else {
+				writeListStr += fmt.Sprintf("|->%s\n", access.String())
+			}
+		}
+		funcSlotAccessStr += readlistStr + writeListStr
+	}
 	throughputStr := ""
 	if s.Throughput.total > 0 {
 		totalQps := float64(s.Throughput.total) / s.Throughput.duration.Seconds()
@@ -284,5 +384,5 @@ func (s summary) string() string {
 		meanQps := float64(s.Throughput.meanning) / s.Throughput.duration.Seconds()
 		throughputStr = fmt.Sprintf("|->Total: %d, Success: %d, Fail: %d, Meanning: %d\n|->QPS: %.2f, SuccessQPS: %.2f, MeanningQPS: %.2f\n", s.Throughput.total, s.Throughput.success, s.Throughput.fail, s.Throughput.meanning, totalQps, sucQps, meanQps)
 	}
-	return fmt.Sprintf("> Throughput:\n%s\n> FunctionBranchCoverage:\n%v\n> CFGCoverage: %s> Errors:\n%v", throughputStr, funcCoverageStr, s.CFGCoverage, errStr)
+	return fmt.Sprintf("> Throughput:\n%s\n> FunctionBranchCoverage:\n%v\n> FunctionSlotAccessList:\n%s\n> CFGCoverage: %s> Errors:\n%v", throughputStr, funcCoverageStr, funcSlotAccessStr, s.CFGCoverage, errStr)
 }

@@ -6,6 +6,8 @@ import (
 	"fadingrose/rosy-nigh/log"
 	"fmt"
 	"strings"
+
+	"github.com/holiman/uint256"
 )
 
 // For a JUMPI, whether it's FALSE or TRUE branch is coverd?
@@ -187,12 +189,32 @@ type SlotCoverage struct {
 	SLOADCover  int
 	SLOADTotal  int
 }
+
+type AccessType int
+
+const (
+	Read AccessType = iota
+	Write
+)
+
+type SlotAccess struct {
+	AccessType
+	Key   uint256.Int
+	Value uint256.Int
+}
+
+func (s SlotAccess) String() string {
+	return fmt.Sprintf("[%v] %s -> %s", s.AccessType, s.Key.Hex(), s.Value.Hex())
+}
+
 type CFG struct {
 	Blocks   []*Block // blocks[0] is entry; order otherwise undefined
 	PathDict *PathDict
 
 	blockMap     map[uint64]*Block
 	slotCoverage SlotCoverage
+
+	accessList map[string][]SlotAccess
 }
 
 func NewCFG(bytecode []byte) *CFG {
@@ -244,6 +266,7 @@ func NewCFG(bytecode []byte) *CFG {
 		slotCoverage: SlotCoverage{
 			0, sstoreTotal, 0, sloadTotal,
 		},
+		accessList: make(map[string][]SlotAccess),
 	}
 }
 
@@ -270,15 +293,31 @@ func (cfg *CFG) CoverageString() string {
 	return fmt.Sprintf("Branch coverage: %d/%d  Statement Coverage: %d/%d\n SlotCoverage: R(%d/%d) W(%d/%d)\n", coveredBranch, totalBranch, coveredStmt, totalStmt, slotCoverage.SLOADCover, slotCoverage.SLOADTotal, slotCoverage.SSTORECover, slotCoverage.SSTORETotal)
 }
 
-// Update updates the CFG with the given list of register keys.
-func (cfg *CFG) Update(reglist []vm.RegKey) {
+// Update updates the CFG with the given list of register keys, then returns slot access list.
+func (cfg *CFG) Update(reglist []vm.RegKey, funcname string) (readlist []SlotAccess, writelist []SlotAccess) {
 	for _, key := range reglist {
 		var (
-			op   = key.OpCode()
-			pc   = key.PC()
-			dest = key.Dest()
-			cond = key.Cond()
+			op        = key.OpCode()
+			pc        = key.PC()
+			dest      = key.Dest()
+			cond      = key.Cond()
+			slotKey   = key.SlotKey()
+			slotValue = key.SlotValue()
 		)
+
+		if op == vm.SLOAD || op == vm.SSTORE {
+			cfg.accessList[funcname] = append(cfg.accessList[funcname], SlotAccess{
+				AccessType: func() AccessType {
+					if op == vm.SLOAD {
+						return Read
+					}
+					return Write
+				}(),
+				Key:   slotKey,
+				Value: slotValue,
+			})
+		}
+
 		switch op {
 		case vm.JUMP:
 			cfg.visitJMP(pc, dest)
@@ -288,6 +327,7 @@ func (cfg *CFG) Update(reglist []vm.RegKey) {
 			cfg.visit(pc)
 		}
 	}
+	return
 }
 
 func (cfg *CFG) StringCoverage() string {
@@ -484,4 +524,8 @@ func (cfg *CFG) ExtractPath(reglist []vm.RegKey) *Path {
 
 	log.Info("Extracted Path: %s", path)
 	return path
+}
+
+func (cfg *CFG) AccessList() map[string][]SlotAccess {
+	return cfg.accessList
 }

@@ -17,9 +17,6 @@ func NewScheduler(abi abi.ABI) *FuncsScheduler {
 }
 
 func (scheduler *FuncsScheduler) GetFucsSequence() []abi.Method {
-	// HACK: only return govWithdrawEther
-	return []abi.Method{scheduler.methods["buyVip"], scheduler.methods["buyVip"], scheduler.methods["buyVip"]}
-
 	// TODO: use funcs scheduler algorithm replace this
 	n := rand.Intn(len(scheduler.methods))
 
@@ -42,4 +39,15 @@ func (scheduler *FuncsScheduler) GetFucsSequence() []abi.Method {
 		funcs = append(funcs, methods[index])
 	}
 	return funcs
+}
+
+func (scheduler *FuncsScheduler) GetSingleFuncList() []abi.Method {
+	var ret []abi.Method
+	for _, method := range scheduler.methods {
+		if method.Name == "" || method.StateMutability == "view" {
+			continue
+		}
+		ret = append(ret, method)
+	}
+	return ret
 }

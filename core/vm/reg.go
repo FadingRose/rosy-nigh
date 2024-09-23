@@ -39,6 +39,10 @@ type Reg struct {
 	// for MLOAD | CallDataLoad
 	offset uint64
 
+	// for SLOAD | SSTORE
+	slotkey   uint256.Int
+	slotvalue uint256.Int
+
 	ArgIndex *abi.ArgIndex
 }
 
@@ -266,6 +270,16 @@ func (r *Reg) setupParams(params []RegKey) {
 		if params[0].reg.Data.Uint64() >= uint64(0x04) {
 			r.offset = params[0].reg.Data.Uint64()
 		}
+	}
+
+	if r.op == SLOAD {
+		r.slotkey = params[0].reg.Data
+		r.slotvalue = r.Data
+	}
+
+	if r.op == SSTORE {
+		r.slotvalue = params[0].reg.Data
+		r.slotkey = params[1].reg.Data
 	}
 
 	set := func(i int, reg *Reg) {

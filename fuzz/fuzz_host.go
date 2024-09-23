@@ -35,6 +35,7 @@ type Solver interface {
 
 type Scheduler interface {
 	GetFucsSequence() []abi.Method
+	GetSingleFuncList() []abi.Method
 }
 
 type Oracle interface {
@@ -259,7 +260,7 @@ func (host *FuzzHost) RunForDeploy() {
 		// 5.a 5.b rebuild and update CFG
 		// in RegKeyList(), regpool will rebuild itself
 		regList = host.evm.SymbolicPool.RegKeyList()
-		host.CFG.Update(regList)
+		host.CFG.Update(regList, "") // constructor's mehotd name is ""
 		// host.wrapCandidates(argList, regList)
 
 		log.Debug(host.CFG.String())
@@ -381,7 +382,7 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCo
 	// 5.a 5.b rebuild and update CFG
 	// in RegKeyList(), regpool will rebuild itself
 	regList = host.evm.SymbolicPool.RegKeyList()
-	host.CFG.Update(regList)
+	host.CFG.Update(regList, method.Name)
 
 	runtimePath = host.CFG.ExtractPath(regList)
 

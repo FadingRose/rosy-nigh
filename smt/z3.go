@@ -102,6 +102,13 @@ func (s *SMTSolverZ3) SolveJumpIcondition(regKey vm.RegKey) (string, bool) {
 		return "", false
 	}
 
+	defer func() {
+		err := recover()
+		if err != nil {
+			fmt.Println(err)
+		}
+	}()
+
 	log.Info(fmt.Sprintf("\n * !![SMT]!! * Satisfied *********\n * !![SMT]!! * s.solver.Model():\n%v * !![SMT]!! *************** *********", s.solver.Model()))
 	return s.solver.Model().String(), true
 }

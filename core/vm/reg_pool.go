@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/holiman/uint256"
 )
 
 type RegKey struct {
@@ -31,6 +33,14 @@ func (rk *RegKey) Dest() uint64 {
 
 func (rk *RegKey) Cond() uint64 {
 	return rk.reg.cond
+}
+
+func (rk *RegKey) SlotKey() uint256.Int {
+	return rk.reg.slotkey
+}
+
+func (rk *RegKey) SlotValue() uint256.Int {
+	return rk.reg.slotvalue
 }
 
 func (rk *RegKey) Offset() uint64 {
