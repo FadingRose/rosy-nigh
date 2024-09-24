@@ -32,6 +32,28 @@ func newJournal() *journal {
 	}
 }
 
+// revert undoes a batch of journalled modifications along with any reverted
+// dirty handling too.
+func (j *journal) revert(statedb *StateDB, snapshot int) {
+	for i := len(j.entries) - 1; i >= snapshot; i-- {
+		// Undo the changes made by the operation
+		j.entries[i].revert(statedb)
+
+		// Drop any dirty tracking induced by the change
+		if addr := j.entries[i].dirtied(); addr != nil {
+			if j.dirties[*addr]--; j.dirties[*addr] == 0 {
+				delete(j.dirties, *addr)
+			}
+		}
+	}
+	j.entries = j.entries[:snapshot]
+}
+
+// length returns the current number of entries in the journal.
+func (j *journal) length() int {
+	return len(j.entries)
+}
+
 // append inserts a new modification entry to the end of the change journal.
 func (j *journal) append(entry journalEntry) {
 	j.entries = append(j.entries, entry)

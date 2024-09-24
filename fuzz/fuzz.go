@@ -145,7 +145,11 @@ func Execute(contractFolder string, debug bool) error {
 //     3.b total branch coverage and statement coverage
 //     3.c error
 func execute(contract *Contract, debug bool) error {
-	var host *FuzzHost
+	var (
+		host      *FuzzHost
+		initState int
+	)
+
 	defer func() {
 		if debug {
 			host.Debug()
@@ -157,6 +161,11 @@ func execute(contract *Contract, debug bool) error {
 
 	log.Info("Fuzzing contract: ", "name", contract.Name)
 	host.RunForDeployOnchain()
+
+	// take a snapshot for the init state
+	initState = host.StateDB.Snapshot()
+
+	log.Info("Init state snapshot: ", "snapshot", initState)
 
 	timeout := time.Duration(5) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -192,6 +201,8 @@ func execute(contract *Contract, debug bool) error {
 					for _, f := range funcs {
 						// NOTE: Loop for each function until timeout or reach full coverage
 						cnt := 0
+
+						initState = host.StateDB.RevertToInitState(initState)
 						for {
 
 							throughputTotal++
@@ -234,7 +245,7 @@ func execute(contract *Contract, debug bool) error {
 
 	// NOTE: Stage 2 Fuzzing with FuncSequence
 	wg.Add(1)
-	timeout2 := time.Duration(30) * time.Second
+	timeout2 := time.Duration(300) * time.Second
 	ctx2, cancel2 := context.WithTimeout(context.Background(), timeout2)
 	defer cancel2()
 
@@ -246,15 +257,18 @@ func execute(contract *Contract, debug bool) error {
 				return
 			default:
 				func() {
-					funcs := host.Scheduler.GetFucsSequence()
+					funcs := host.Scheduler.GetFuncsSequence(host.CFG.RWMap())
 					fmt.Println("funcs: ", funcs)
 					// for a specific func sequence [A->B->C], assume that we have execute A and B, then we try to go through C
+					initState = host.StateDB.RevertToInitState(initState)
+
 					for _, f := range funcs {
 						retry := 10
 						halt := false
 
 						for retry > 0 {
 							throughputTotal++
+							// WARN: should we reset statedb to the initial state?
 							_, funcCover, funcTotal, err := host.FuzzOnce(f)
 
 							// fmt.Println("fuzzing: ", f.Name, funcCover, funcTotal, err, host.Err)
@@ -281,9 +295,13 @@ func execute(contract *Contract, debug bool) error {
 						}
 
 						if halt {
-							// TODO: if this funcs sequence is NOT a good one, let Scheduler knows
+							// DONE: if this funcs sequence is NOT a good one, let Scheduler knows
+							// log.Info("Bad Funcs ", "funcs", funcs)
+							host.Scheduler.BadFuncs()
 							break
 						}
+
+						host.Scheduler.GoodFuncs()
 					}
 				}()
 			}
@@ -304,11 +322,15 @@ func execute(contract *Contract, debug bool) error {
 	sum.CFGCoverage = host.CFG.CoverageString()
 	sum.FunctionAcceessList = host.CFG.AccessList()
 
+	fmt.Printf("Contract Owner: %s\nDeploy at: %s\nAttacker: %s\n", host.OwnerAddress.Hex(), host.DeployAt.Hex(), host.Attackers[0].Hex())
+
 	fmt.Println(sum.string())
+
+	fmt.Println(host.CFG.String())
 
 	fmt.Println(host.Oracle.HumanReport())
 
-	fmt.Println(host.CFG.String())
+	fmt.Println(host.Mutator.String())
 
 	return nil
 }
@@ -366,16 +388,21 @@ func (s summary) string() string {
 	funcSlotAccessStr := ""
 	for name, accessList := range s.FunctionAcceessList {
 		funcSlotAccessStr += "|->" + name + ":\n"
-		readlistStr := ""
-		writeListStr := ""
+		// readlistStr := ""
+		// writeListStr := ""
+		last := ""
 		for _, access := range accessList {
-			if access.AccessType == cfg.Read {
-				readlistStr += fmt.Sprintf("|->%s\n", access.String())
-			} else {
-				writeListStr += fmt.Sprintf("|->%s\n", access.String())
+			if last == access.String() {
+				continue
 			}
+			last = access.String()
+			funcSlotAccessStr += fmt.Sprintf("|->%s\n", access.String())
+			// if access.AccessType == cfg.Read {
+			// 	readlistStr += fmt.Sprintf("|->%s\n", access.String())
+			// } else {
+			// 	writeListStr += fmt.Sprintf("|->%s\n", access.String())
+			// }
 		}
-		funcSlotAccessStr += readlistStr + writeListStr
 	}
 	throughputStr := ""
 	if s.Throughput.total > 0 {
@@ -384,5 +411,5 @@ func (s summary) string() string {
 		meanQps := float64(s.Throughput.meanning) / s.Throughput.duration.Seconds()
 		throughputStr = fmt.Sprintf("|->Total: %d, Success: %d, Fail: %d, Meanning: %d\n|->QPS: %.2f, SuccessQPS: %.2f, MeanningQPS: %.2f\n", s.Throughput.total, s.Throughput.success, s.Throughput.fail, s.Throughput.meanning, totalQps, sucQps, meanQps)
 	}
-	return fmt.Sprintf("> Throughput:\n%s\n> FunctionBranchCoverage:\n%v\n> FunctionSlotAccessList:\n%s\n> CFGCoverage: %s> Errors:\n%v", throughputStr, funcCoverageStr, funcSlotAccessStr, s.CFGCoverage, errStr)
+	return fmt.Sprintf("> Throughput:\n%s\n> FunctionBranchCoverage:\n%v\n> CFGCoverage: %s> FunctionSlotAccessList:\n%s\n> Errors:\n%v", throughputStr, funcCoverageStr, s.CFGCoverage, funcSlotAccessStr, errStr)
 }

@@ -1,6 +1,7 @@
 package fuzz
 
 import (
+	"crypto/rand"
 	"fadingrose/rosy-nigh/abi"
 	"fadingrose/rosy-nigh/cfg"
 	"fadingrose/rosy-nigh/core"
@@ -34,8 +35,10 @@ type Solver interface {
 }
 
 type Scheduler interface {
-	GetFucsSequence() []abi.Method
+	GetFuncsSequence(rwmap *cfg.RWMap) []abi.Method
 	GetSingleFuncList() []abi.Method
+	BadFuncs()
+	GoodFuncs()
 }
 
 type Oracle interface {
@@ -49,8 +52,9 @@ type FuzzHost struct {
 	ChainConfig  params.ChainConfig
 	EVMConfig    vm.Config
 
-	SenderAddress common.Address
-	DeployAt      common.Address
+	OwnerAddress common.Address
+	DeployAt     common.Address
+	Attackers    []common.Address
 
 	Mutator
 	Solver
@@ -74,6 +78,19 @@ func NewFuzzHost(target *Contract, statedb *state.StateDB, blockCtx vm.BlockCont
 	solver := smt.NewSolver()
 	scheduler := NewScheduler(target.ABI)
 	oracle := oracle.NewOracleHost()
+	attackers := func() []common.Address {
+		nums := 10
+		addrs := make([]common.Address, nums)
+		for i := 0; i < nums; i++ {
+			bs := make([]byte, 20)
+			_, err := rand.Read(bs)
+			if err != nil {
+				panic(err)
+			}
+			addrs[i] = common.BytesToAddress(bs)
+		}
+		return addrs
+	}()
 	// cfg := cfg.NewCFG(target.CreationBin)
 	return &FuzzHost{
 		StateDB:      statedb,
@@ -81,7 +98,8 @@ func NewFuzzHost(target *Contract, statedb *state.StateDB, blockCtx vm.BlockCont
 		ChainConfig:  chainConfig,
 		EVMConfig:    config,
 
-		SenderAddress: target.Creator,
+		OwnerAddress: target.Creator,
+		Attackers:    attackers,
 
 		Mutator: mutator,
 
@@ -99,22 +117,22 @@ func NewFuzzHost(target *Contract, statedb *state.StateDB, blockCtx vm.BlockCont
 }
 
 func (host *FuzzHost) RunForDeployOnchain() {
-	nonce := host.StateDB.GetNonce(host.SenderAddress)
+	nonce := host.StateDB.GetNonce(host.OwnerAddress)
 	amount := big.NewInt(0)
-	host.StateDB.AddBalance(host.SenderAddress, uint256.NewInt(uint64(10000000)), tracing.BalanceChangeUnspecified)
+	host.StateDB.AddBalance(host.OwnerAddress, uint256.NewInt(uint64(10000000)), tracing.BalanceChangeUnspecified)
 	gasLimit := uint64(1000000)
 	gasPrice := big.NewInt(0)
 	signer := types.MakeSigner(&host.ChainConfig, big.NewInt(0), 0)
 	basefee := big.NewInt(0)
 	gaspool := core.GasPool(gasLimit)
 
-	log.Info("(onchain)Fuzzing contract deployment", "constructor", host.Target.ABI.Constructor)
+	log.Info("(onchain) Fuzzing contract deployment", "constructor", host.Target.ABI.Constructor)
 
 	codes := host.Target.CreationBin
 
 	tx := types.NewContractCreation(nonce, amount, gasLimit, gasPrice, codes)
 	msg, _ := core.TransactionToMessage(tx, signer, basefee)
-	msg.From = host.SenderAddress
+	msg.From = host.OwnerAddress
 	msg.SkipAccountChecks = true // do NOT check nonce
 	context := core.NewEVMTxContext(msg)
 
@@ -123,7 +141,7 @@ func (host *FuzzHost) RunForDeployOnchain() {
 		coinbase = host.BlockContext.Coinbase
 	)
 
-	host.StateDB.Prepare(rules, host.SenderAddress, coinbase, nil, vm.ActivePrecompiles(rules), nil)
+	host.StateDB.Prepare(rules, host.OwnerAddress, coinbase, nil, vm.ActivePrecompiles(rules), nil)
 	evm := vm.NewEVM(host.BlockContext, context, host.StateDB, &host.ChainConfig, host.EVMConfig)
 	host.evm = evm
 	result, err := core.ApplyMessage(evm, msg, &gaspool)
@@ -162,9 +180,9 @@ func (host *FuzzHost) RunForDeployOnchain() {
 
 // WARN: Deprecated
 func (host *FuzzHost) RunForDeploy() {
-	nonce := host.StateDB.GetNonce(host.SenderAddress)
+	nonce := host.StateDB.GetNonce(host.OwnerAddress)
 	amount := big.NewInt(0)
-	host.StateDB.AddBalance(host.SenderAddress, uint256.NewInt(uint64(10000000)), tracing.BalanceChangeUnspecified)
+	host.StateDB.AddBalance(host.OwnerAddress, uint256.NewInt(uint64(10000000)), tracing.BalanceChangeUnspecified)
 	gasLimit := uint64(1000000)
 	gasPrice := big.NewInt(0)
 	signer := types.MakeSigner(&host.ChainConfig, big.NewInt(0), 0)
@@ -228,7 +246,7 @@ func (host *FuzzHost) RunForDeploy() {
 
 		tx := types.NewContractCreation(nonce, amount, gasLimit, gasPrice, codes)
 		msg, _ := core.TransactionToMessage(tx, signer, basefee)
-		msg.From = host.SenderAddress
+		msg.From = host.OwnerAddress
 		msg.SkipAccountChecks = true // do NOT check nonce
 		context := core.NewEVMTxContext(msg)
 
@@ -238,7 +256,7 @@ func (host *FuzzHost) RunForDeploy() {
 			coinbase = host.BlockContext.Coinbase
 		)
 
-		host.StateDB.Prepare(rules, host.SenderAddress, coinbase, nil, vm.ActivePrecompiles(rules), nil)
+		host.StateDB.Prepare(rules, host.OwnerAddress, coinbase, nil, vm.ActivePrecompiles(rules), nil)
 		evm := vm.NewEVM(host.BlockContext, context, host.StateDB, &host.ChainConfig, host.EVMConfig)
 		host.evm = evm
 		result, err := core.ApplyMessage(evm, msg, &gaspool)
@@ -288,7 +306,8 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCo
 	//    5.c send to SMT, desire a better input / magic number
 
 	var (
-		nonce    = host.StateDB.GetNonce(host.SenderAddress)
+		nonce    = host.StateDB.GetNonce(host.OwnerAddress)
+		from     = host.Attackers[0]
 		to       = host.DeployAt
 		amount   = host.Mutator.GenerateCallValue()
 		gasLimit = uint64(1000000)
@@ -338,7 +357,7 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCo
 
 	tx := types.NewTransaction(nonce, to, amount, gasLimit, gasPrice, data)
 	msg, _ := core.TransactionToMessage(tx, signer, basefee)
-	msg.From = host.SenderAddress
+	msg.From = from
 	msg.SkipAccountChecks = true // do NOT check nonce
 	context := core.NewEVMTxContext(msg)
 	// 3. Create a new EVM and run the message
@@ -347,7 +366,7 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCo
 		coinbase = host.BlockContext.Coinbase
 	)
 
-	host.StateDB.Prepare(rules, host.SenderAddress, coinbase, nil, vm.ActivePrecompiles(rules), nil)
+	host.StateDB.Prepare(rules, from, coinbase, nil, vm.ActivePrecompiles(rules), nil)
 	evm := vm.NewEVM(host.BlockContext, context, host.StateDB, &host.ChainConfig, host.EVMConfig)
 	host.evm = evm
 	result, err := core.ApplyMessage(evm, msg, &gaspool)
@@ -489,5 +508,5 @@ func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey
 
 // host.registReceiver(receiver)
 func (host *FuzzHost) registReceiver(receiver []byte) {
-	host.StateDB.SetCode(host.SenderAddress, receiver)
+	host.StateDB.SetCode(host.OwnerAddress, receiver)
 }

@@ -193,9 +193,21 @@ type SlotCoverage struct {
 type AccessType int
 
 const (
-	Read AccessType = iota
+	Unknown AccessType = iota
+	Read
 	Write
 )
+
+func (at AccessType) string() string {
+	switch at {
+	case Read:
+		return "R"
+	case Write:
+		return "W"
+	default:
+		return "Unknown"
+	}
+}
 
 type SlotAccess struct {
 	AccessType
@@ -204,7 +216,7 @@ type SlotAccess struct {
 }
 
 func (s SlotAccess) String() string {
-	return fmt.Sprintf("[%v] %s -> %s", s.AccessType, s.Key.Hex(), s.Value.Hex())
+	return fmt.Sprintf("[%s] %s -> %s", s.AccessType.string(), s.Key.Hex(), s.Value.Hex())
 }
 
 type CFG struct {
@@ -215,6 +227,7 @@ type CFG struct {
 	slotCoverage SlotCoverage
 
 	accessList map[string][]SlotAccess
+	rwmap      *RWMap
 }
 
 func NewCFG(bytecode []byte) *CFG {
@@ -267,6 +280,7 @@ func NewCFG(bytecode []byte) *CFG {
 			0, sstoreTotal, 0, sloadTotal,
 		},
 		accessList: make(map[string][]SlotAccess),
+		rwmap:      nil,
 	}
 }
 
@@ -522,8 +536,13 @@ func (cfg *CFG) ExtractPath(reglist []vm.RegKey) *Path {
 		}
 	}
 
-	log.Info("Extracted Path: %s", path)
+	log.Debug("Extracted Path: %s", path)
 	return path
+}
+
+func (cfg *CFG) RWMap() *RWMap {
+	cfg.rwmap = NewRWMap(cfg.accessList)
+	return cfg.rwmap
 }
 
 func (cfg *CFG) AccessList() map[string][]SlotAccess {

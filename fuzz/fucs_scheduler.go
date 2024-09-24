@@ -2,12 +2,15 @@ package fuzz
 
 import (
 	"fadingrose/rosy-nigh/abi"
+	"fadingrose/rosy-nigh/cfg"
 
 	"golang.org/x/exp/rand"
 )
 
 type FuncsScheduler struct {
 	methods map[string]abi.Method
+
+	length int // visit length
 }
 
 func NewScheduler(abi abi.ABI) *FuncsScheduler {
@@ -16,7 +19,16 @@ func NewScheduler(abi abi.ABI) *FuncsScheduler {
 	}
 }
 
-func (scheduler *FuncsScheduler) GetFucsSequence() []abi.Method {
+func (scheduler *FuncsScheduler) GetFuncsSequence(rwmap *cfg.RWMap) []abi.Method {
+	funcs := rwmap.Visit(scheduler.length)
+	var ret []abi.Method
+	for _, f := range funcs {
+		ret = append(ret, scheduler.methods[f])
+	}
+	return ret
+}
+
+func (scheduler *FuncsScheduler) getFuncsSequence() []abi.Method {
 	// TODO: use funcs scheduler algorithm replace this
 	n := rand.Intn(len(scheduler.methods))
 
@@ -50,4 +62,10 @@ func (scheduler *FuncsScheduler) GetSingleFuncList() []abi.Method {
 		ret = append(ret, method)
 	}
 	return ret
+}
+
+func (scheduler *FuncsScheduler) BadFuncs() {
+}
+
+func (scheduler *FuncsScheduler) GoodFuncs() {
 }

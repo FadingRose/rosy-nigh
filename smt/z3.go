@@ -5,6 +5,7 @@ import (
 	"fadingrose/rosy-nigh/log"
 	"fmt"
 	"math/big"
+	"runtime"
 	"strings"
 
 	"github.com/aclements/go-z3/z3"
@@ -54,10 +55,10 @@ func NewSolver() *SMTSolverZ3 {
 func (s *SMTSolverZ3) AddExclusion(name string, val *big.Int) {
 	index := exclusionIndex(name + val.String())
 	if _, ok := s.exclusion[index]; !ok {
-		log.Info(fmt.Sprintf(" * [SMT] * Receive Exclusion %s != %s", name, val))
+		log.Debug(fmt.Sprintf(" * [SMT] * Receive Exclusion %s != %s", name, val))
 		s.exclusion[index] = exclusion{name, val}
 	} else {
-		log.Info("add exclusion failed, already existed")
+		log.Debug("add exclusion failed, already existed")
 	}
 }
 
@@ -65,7 +66,7 @@ func (s *SMTSolverZ3) loadExclusions() {
 	for _, e := range s.exclusion {
 		_var := s._ctx.IntConst(e.name)
 		_low_quality := s._ctx.FromBigInt(e.val, s._ctx.IntSort()).(z3.Int)
-		log.Info(fmt.Sprintf(" * [SMT] * Load Exclusion %s != %s", _var, _low_quality))
+		log.Debug(fmt.Sprintf(" * [SMT] * Load Exclusion %s != %s", _var, _low_quality))
 
 		s.solver.Assert(_var.NE(_low_quality))
 	}
@@ -74,6 +75,9 @@ func (s *SMTSolverZ3) loadExclusions() {
 // SolveJumpIcondition(vm.RegKey) (string, bool)
 // TODO; impl this
 func (s *SMTSolverZ3) SolveJumpIcondition(regKey vm.RegKey) (string, bool) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	// Reset Solver
 	s.solver.Reset()
 
@@ -109,7 +113,7 @@ func (s *SMTSolverZ3) SolveJumpIcondition(regKey vm.RegKey) (string, bool) {
 		}
 	}()
 
-	log.Info(fmt.Sprintf("\n * !![SMT]!! * Satisfied *********\n * !![SMT]!! * s.solver.Model():\n%v * !![SMT]!! *************** *********", s.solver.Model()))
+	log.Warn(fmt.Sprintf("\n * !![SMT]!! * Satisfied *********\n * !![SMT]!! * s.solver.Model():\n%v * !![SMT]!! *************** *********", s.solver.Model()))
 	return s.solver.Model().String(), true
 }
 
@@ -125,7 +129,7 @@ func (s *SMTSolverZ3) resolveCondition(cond *vm.Reg) {
 		// condition L eq 0x00?
 		// -> Reg.val is 0x01 -> try to assert NEQ
 		// -> Reg.val is 0x00 -> try to assert EQ
-		log.Info(fmt.Sprintf("   -- SMT: Nary Expression %s\n", cond.String()))
+		log.Debug(fmt.Sprintf("   -- SMT: Nary Expression %s\n", cond.String()))
 		zero := uint256.NewInt(uint64(0))
 		_zero := s._ctx.FromBigInt(zero.ToBig(), s._ctx.IntSort()).(z3.Int)
 
@@ -141,7 +145,7 @@ func (s *SMTSolverZ3) resolveCondition(cond *vm.Reg) {
 	// [2] _r != nil means the condition is a Binary Expression
 	// we try to assert
 
-	log.Info(fmt.Sprintf("   -- SMT: Binary Expression %s\n", cond.String()))
+	log.Debug(fmt.Sprintf("   -- SMT: Binary Expression %s\n", cond.String()))
 	r := s.resolve(cond.M)
 
 	zero := uint256.NewInt(uint64(0))
@@ -254,20 +258,20 @@ func (s *SMTSolverZ3) resolveCondition(cond *vm.Reg) {
 		panic("unhandled condition reg's op " + cond.OpCode().String())
 	}
 
-	log.Info(fmt.Sprintf("   -- SMT: Tring Asserting  %s\n", expr))
+	log.Debug(fmt.Sprintf("   -- SMT: Tring Asserting  %s\n", expr))
 }
 
 func (s *SMTSolverZ3) resolve(reg *vm.Reg) z3.Int {
 	// Stop resolve at these condition
 	op := reg.OpCode()
 
-	log.Info(fmt.Sprintf("   -- SMT: Resolving %s\n", reg.String()))
+	log.Debug(fmt.Sprintf("   -- SMT: Resolving %s\n", reg.String()))
 
 	// Create Symbolic Variable First
 	if name, err := reg.GetBindName(); err == nil {
-		log.Info(fmt.Sprintf("   -! SMT: Creating Symbolic Variable %s -> %s\n", reg.Name(), name))
+		log.Debug(fmt.Sprintf("   -! SMT: Creating Symbolic Variable %s -> %s\n", reg.Name(), name))
 		tpname, _ := reg.GetBindType()
-		log.Info(fmt.Sprintf("   -! SMT: Add %s type assertion constrains", tpname))
+		log.Debug(fmt.Sprintf("   -! SMT: Add %s type assertion constrains", tpname))
 		if tpname == "" {
 			log.Warn("no type for " + name)
 		}
@@ -313,7 +317,7 @@ func (s *SMTSolverZ3) resolve(reg *vm.Reg) z3.Int {
 			s.solver.Assert(_var.GE(_zero))
 			s.solver.Assert(_var.LE(_upper))
 
-			log.Info(fmt.Sprintf("   -! SMT: Add %s type assertion constrains", tps))
+			log.Debug(fmt.Sprintf("   -! SMT: Add %s type assertion constrains", tps))
 			return _var
 		}
 
@@ -355,7 +359,7 @@ func (s *SMTSolverZ3) resolve(reg *vm.Reg) z3.Int {
 			s.solver.Assert(_var.GE(_floor))
 			s.solver.Assert(_var.LE(_upper))
 
-			log.Info(fmt.Sprintf("   -! SMT: Add %s type assertion constrains", tps))
+			log.Debug(fmt.Sprintf("   -! SMT: Add %s type assertion constrains", tps))
 			return _var
 		}
 
@@ -364,7 +368,7 @@ func (s *SMTSolverZ3) resolve(reg *vm.Reg) z3.Int {
 
 	var exec func(*SMTSolverZ3, *vm.Reg) z3.Int
 	if op.IsPush() {
-		log.Info(fmt.Sprintf("   -- *SMT: Loading Literal %s <- %s\n", &reg.Data, reg.Name()))
+		log.Debug(fmt.Sprintf("   -- *SMT: Loading Literal %s <- %s\n", &reg.Data, reg.Name()))
 		exec = literal
 	} else {
 		exec = smtHandlermap()[op]
@@ -421,13 +425,13 @@ func smtHandlermap() smtHandlerMap {
 func literal(smt *SMTSolverZ3, reg *vm.Reg) z3.Int {
 	if reg.OpCode().IsPush() {
 
-		log.Info(fmt.Sprintf("   -- *SMT: Loading Literal %s <- %s\n", &reg.Data, reg.String()))
+		log.Debug(fmt.Sprintf("   -- *SMT: Loading Literal %s <- %s\n", &reg.Data, reg.String()))
 		val := reg.Data
 		_val := smt._ctx.FromBigInt(val.ToBig(), smt._ctx.IntSort()).(z3.Int)
 		return _val
 	}
 
-	log.Info(fmt.Sprintf("   -- *SMT: Loading Literal  %s <- %s\n", &reg.Data, reg.OpCode().String()))
+	log.Debug(fmt.Sprintf("   -- *SMT: Loading Literal  %s <- %s\n", &reg.Data, reg.OpCode().String()))
 
 	if reg.OpCode() == vm.CALLVALUE {
 		_var := smt._ctx.IntConst("CallValue")
@@ -482,7 +486,7 @@ func logic(smt *SMTSolverZ3, reg *vm.Reg) z3.Int {
 		_info := fmt.Sprintf("smt : unhandled logic %s", reg.OpCode().String())
 		panic(_info)
 	}
-	log.Info(fmt.Sprintf("   -- *SMT: Logic Operations : %s\n", expression))
+	log.Debug(fmt.Sprintf("   -- *SMT: Logic Operations : %s\n", expression))
 
 	return _val
 }
@@ -552,6 +556,6 @@ func alu(smt *SMTSolverZ3, reg *vm.Reg) z3.Int {
 	default:
 		panic(fmt.Sprintf("******** SMT: Unresolved operation %s of %s", reg.OpCode(), reg.String()))
 	}
-	log.Info(fmt.Sprintf("   -- *SMT: ALU Operations : %s\n", expression))
+	log.Debug(fmt.Sprintf("   -- *SMT: ALU Operations : %s\n", expression))
 	return ret
 }

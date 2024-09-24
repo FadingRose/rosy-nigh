@@ -5,6 +5,7 @@ import (
 	"fadingrose/rosy-nigh/onchain"
 	"fmt"
 	"slices"
+	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -12,6 +13,11 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 )
+
+type revision struct {
+	id           int
+	journalIndex int
+}
 
 type StateDB struct {
 	// online Database
@@ -31,7 +37,9 @@ type StateDB struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal *journal
+	journal        *journal
+	validRevisions []revision
+	nextRevisionId int
 
 	// The tx context and all occurred logs in the scope of transaction.
 	thash   common.Hash
@@ -238,13 +246,36 @@ func (s *StateDB) Exist(addr common.Address) bool {
 	return s.getStateObject(addr) != nil
 }
 
-// TODO: Implement RevertToSnapshot
+// RevertToSnapshot reverts all state changes made since the given revision.
 func (s *StateDB) RevertToSnapshot(revid int) {
+	// Find the snapshot in the stack of valid snapshots.
+	idx := sort.Search(len(s.validRevisions), func(i int) bool {
+		return s.validRevisions[i].id >= revid
+	})
+	if idx == len(s.validRevisions) || s.validRevisions[idx].id != revid {
+		panic(fmt.Errorf("revision id %v cannot be reverted", revid))
+	}
+	snapshot := s.validRevisions[idx].journalIndex
+
+	// Replay the journal to undo changes and remove invalidated snapshots
+	s.journal.revert(s, snapshot)
+	s.validRevisions = s.validRevisions[:idx]
+	// log.Info("Reverting to snapshot", "revid", revid, "validRevisions", s.validRevisions)
 }
 
-// TODO: Implement Snapshot
+// TODO: add a  fucntion, revert to the init state
+func (s *StateDB) RevertToInitState(initState int) int {
+	s.RevertToSnapshot(initState)
+	return s.Snapshot()
+}
+
+// Snapshot returns an identifier for the current revision of the state.
 func (s *StateDB) Snapshot() int {
-	return 0
+	id := s.nextRevisionId
+	s.nextRevisionId++
+	s.validRevisions = append(s.validRevisions, revision{id, s.journal.length()})
+	// log.Info("Taking Snapshot", "revision", s.nextRevisionId-1, "validRevisions", s.validRevisions)
+	return id
 }
 
 // AddAddressToAccessList adds the given address to the access list

@@ -86,7 +86,7 @@ func main() {
 					if debug {
 						enableDebugLogging()
 					} else {
-						enableVerboseLogging()
+						enableInfoLogging()
 					}
 					cacheFolder, err := fuzz.PrepareOnchainCache(onchainAddress)
 					if err != nil {
@@ -102,6 +102,10 @@ func main() {
 		},
 	}
 	fuzzCli.Run(os.Args)
+}
+
+func enableInfoLogging() {
+	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelInfo, true)))
 }
 
 // enableVerboseLogging enables verbose output to terminal

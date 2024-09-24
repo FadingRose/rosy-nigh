@@ -297,12 +297,12 @@ func (m *Mutator) AddSolution(rk vm.RegKey, solution string) {
 	}
 	info.WriteString(" * [Mutator] * End of Solution\n\n")
 
-	log.Info(info.String())
+	log.Debug(info.String())
 }
 
 func (m *Mutator) addSolution(rk vm.RegKey, solution Solution) {
 	if solution.SolutionType == MagicNumber {
-		log.Info(fmt.Sprintf("Inherit MagicVault %s : %s\n", solution.MagicNumber, solution.Value))
+		log.Debug(fmt.Sprintf("Inherit MagicVault %s : %s\n", solution.MagicNumber, solution.Value))
 		m.MagicNumberVaults[solution.MagicNumber].Inherit(solution.Value)
 		return
 	}
