@@ -6,13 +6,13 @@ import (
 	"testing"
 )
 
-type mockClient struct{}
+type MockClient struct{}
 
-func (m *mockClient) RegExpand(pc uint64) (string, error) {
+func (m *MockClient) RegExpand(pc uint64) (string, error) {
 	return "mock reg expand", nil
 }
 
-func (m *mockClient) RegOpcode(op vm.OpCode) (string, error) {
+func (m *MockClient) RegOpcode(op vm.OpCode) (string, error) {
 	return "mock opcode", nil
 }
 
@@ -33,7 +33,7 @@ func (sr *StringReader) Read(p []byte) (int, error) {
 }
 
 func TestRegCmds(t *testing.T) {
-	mock := &mockClient{}
+	mock := &MockClient{}
 	stdin := newStringReader()
 	_, err := stdin.WriteString(".reg 0x1\n")
 	if err != nil {

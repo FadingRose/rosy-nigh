@@ -3,6 +3,7 @@ package terminal
 import (
 	"fadingrose/rosy-nigh/core/vm"
 	"fadingrose/rosy-nigh/service"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -26,8 +27,12 @@ type command struct {
 
 func (c command) exec(term *Term, ctx callContext, argstr string) error {
 	argmap := make(map[string]interface{})
+
 	for _, f := range c.flags {
-		name, val := f.Parse(argstr)
+		name, val, err := f.Parse(argstr)
+		if err != nil {
+			return fmt.Errorf("%s", c.helpMsg)
+		}
 		argmap[name] = val
 	}
 	return c.cmdFn(term, ctx, argmap)
@@ -65,6 +70,7 @@ func DebugCommands(client service.Client) *Commands {
 				FlagBase[uint64]{"expand", []string{"--expand", "-e"}, 0},
 				FlagBase[vm.OpCode]{"opcode", []string{"--opcode", "-o"}, 0},
 			},
+			helpMsg: "Usage: .reg [--expand|-e <value>] [--opcode|-o <value>]\nExample .reg --expand 0x1\n",
 		},
 	}
 
@@ -98,7 +104,11 @@ func (c *Commands) Find(cmdstr string) command {
 			return cmd
 		}
 	}
-	return command{}
+	return command{
+		cmdFn: func(t *Term, ctx callContext, args map[string]interface{}) error {
+			return nil
+		},
+	}
 }
 
 // CallWithContext takes a command and a context that command should be executed in.
@@ -109,6 +119,7 @@ func (c *Commands) CallWithContext(cmdstr string, t *Term, ctx callContext) erro
 	if len(vals) > 1 {
 		args = vals[1]
 	}
+
 	return c.Find(cmdname).exec(t, ctx, args)
 }
 

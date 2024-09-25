@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"fadingrose/rosy-nigh/core/vm"
 	"fadingrose/rosy-nigh/fuzz"
 	"fadingrose/rosy-nigh/log"
+	"fadingrose/rosy-nigh/terminal"
 	"fmt"
 	"os"
 
@@ -99,6 +102,16 @@ func main() {
 					return nil
 				},
 			},
+			{
+				Name:  "debug",
+				Usage: "Debug a start Fuzzing server",
+				Action: func(c *cli.Context) error {
+					client := MockClient{}
+					stdin := os.Stdin
+					term := terminal.NewTerminal(&client, stdin)
+					return term.Run()
+				},
+			},
 		},
 	}
 	fuzzCli.Run(os.Args)
@@ -111,4 +124,30 @@ func enableVerboseLogging() {
 
 func enableDebugLogging() {
 	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
+}
+
+type MockClient struct{}
+
+func (m *MockClient) RegExpand(pc uint64) (string, error) {
+	return "mock reg expand", nil
+}
+
+func (m *MockClient) RegOpcode(op vm.OpCode) (string, error) {
+	return "mock opcode", nil
+}
+
+type StringReader struct {
+	buf *bytes.Buffer
+}
+
+func newStringReader() *StringReader {
+	return &StringReader{buf: new(bytes.Buffer)}
+}
+
+func (sr *StringReader) WriteString(s string) (int, error) {
+	return sr.buf.WriteString(s)
+}
+
+func (sr *StringReader) Read(p []byte) (int, error) {
+	return sr.buf.Read(p)
 }

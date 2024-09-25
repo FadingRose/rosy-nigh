@@ -8,7 +8,7 @@ import (
 )
 
 type Flag interface {
-	Parse(string) (name string, val any)
+	Parse(string) (name string, val any, err error)
 }
 
 type FlagBase[T any] struct {
@@ -17,7 +17,7 @@ type FlagBase[T any] struct {
 	value T
 }
 
-func (f FlagBase[T]) Parse(s string) (name string, val any) {
+func (f FlagBase[T]) Parse(s string) (name string, val any, err error) {
 	var zero T
 	tp := reflect.TypeOf(zero)
 	value := reflect.New(tp).Elem()
@@ -33,7 +33,7 @@ func (f FlagBase[T]) Parse(s string) (name string, val any) {
 		}
 
 		if err != nil {
-			panic(fmt.Sprintf("error parsing %s as uint64: %v", s, err))
+			return "", nil, fmt.Errorf("error parsing %s as uint64: %v", s, err)
 		}
 
 		value.SetUint(val)
@@ -47,5 +47,5 @@ func (f FlagBase[T]) Parse(s string) (name string, val any) {
 		panic("unsupported type")
 	}
 	f.value = value.Interface().(T)
-	return f.Name, f.value
+	return f.Name, f.value, nil
 }

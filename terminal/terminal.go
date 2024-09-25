@@ -31,20 +31,18 @@ func NewTerminal(client service.Client, stdin io.Reader) *Term {
 	return t
 }
 
-func (t *Term) Run() {
+func (t *Term) Run() error {
 	var lastCmd string
 	for {
 		cmdstr, err := t.promptFromInput()
 		if err != nil {
 			if err == io.EOF {
-				fmt.Fprintln(t.stdout.w, "Exiting...")
-				return
+				return fmt.Errorf("exiting terminal: %v", err)
 			}
-			fmt.Fprintf(t.stdout.w, "Error reading input: %v\n", err)
-			return
+			return fmt.Errorf("error reading input: %v", err)
 		}
 
-		// t.stdout.Echo(t.prompt + cmdstr + "\n")
+		t.stdout.Echo(t.prompt + cmdstr + "\n")
 
 		if strings.TrimSpace(cmdstr) == "" {
 			cmdstr = lastCmd
@@ -53,12 +51,15 @@ func (t *Term) Run() {
 		lastCmd = cmdstr
 
 		if err := t.cmds.Call(cmdstr, t); err != nil {
+			fmt.Println(err)
+			// return fmt.Errorf("error executing command: %v", err)
 		}
 	}
+	return nil
 }
 
 // promptFromInput reads a line of input from the terminal
-// TODO: suppot auto-completion
+// TODO: support auto-completion
 func (t *Term) promptFromInput() (string, error) {
 	return t.input.ReadString('\n')
 }
