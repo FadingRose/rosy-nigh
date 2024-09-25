@@ -408,6 +408,7 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCo
 	// NOTE: if flag is True, it means all the solvable branch for the method has been covered
 	// solvable: see wrapCandidates, ingeneral, after we expand a JUMPI, not all the BASE value source can be symbolized
 	_, funcCovered, funcTotal = host.wrapCandidates(argList, regList, runtimePath)
+
 	return runtimePath, funcCovered, funcTotal, nil
 }
 
@@ -427,7 +428,9 @@ func (host *FuzzHost) Debug() {
 	host.evm.SymbolicPool.Debug()
 }
 
-// wrapCandidates is a function to collect all the JUMPI, expand it, if there is a bind in the collection, send it to SMT
+// wrapCandidates processes the register keys to identify and handle JUMPI instructions,
+// binding arguments to registers and calculating branch coverage. It also sends candidates
+// to the SMT solver for further analysis and updates the mutator with solutions.
 func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey, runtimePath *cfg.Path) ([]vm.RegKey, int, int) {
 	// this is for create function
 	isBind := func(rk vm.RegKey) (abi.ArgIndex, bool) {

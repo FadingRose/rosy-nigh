@@ -6,6 +6,7 @@ require (
 	github.com/aclements/go-z3 v0.0.0-20220809013456-4675d5f90ca5
 	github.com/consensys/gnark-crypto v0.12.1
 	github.com/ethereum/go-ethereum v1.14.8
+	github.com/fatih/color v1.16.0
 	github.com/holiman/uint256 v1.3.1
 	github.com/pelletier/go-toml v1.9.5
 	github.com/urfave/cli/v2 v2.25.7
@@ -44,6 +45,8 @@ require (
 	github.com/klauspost/compress v1.16.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect

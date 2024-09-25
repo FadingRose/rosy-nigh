@@ -1,6 +1,6 @@
 # Rosy Nigh
 
-// TODO: Write a project description
+- [ ] 实现对于 Slot 和 Memory 的追踪与求解
 
 For EVM execution details, see [EVM Execution Model](./evm-execution-model.md)
 
@@ -14,9 +14,6 @@ A fuzz host holds these components and middleware:
 - Symbolic Interpreter, Shadow Memory Storage, and StateDB
 - Test Oracle
 - Online Fuzzing Adapter
-
-## Interpreter
-
 
 ## EVM Runtime Environment
 
@@ -38,7 +35,19 @@ Rosy-Nigh supports on-chain fuzzing by supports StateDB with cache.
 
 > See [On-Chain DB](../onchain/onchain.go)
 
+## Z3 Solver Adapter
 
+For any `JUMPI`, tree-expand all instructions (referred to as `relies`) with the following characteristics to be processed:
+
+1. Bound to a specific actual argument / MagicNumber?
+2. Dependent on a specific Memory? Slot? Location?
+
+For 1., SMT can solve it directly. For 2., consider the following discussions:
+
+1. Does the sequence contain a write to this location? If so, attempt to solve it.
+2. Does the sequence contain a read from this location? If so, attempt to solve it.
+
+We aim to transform all 2. problems into 1. problems.
 # Roadmap
 
 ### StateDB
@@ -52,4 +61,12 @@ Rosy-Nigh supports on-chain fuzzing by supports StateDB with cache.
 Step 0 Pre-Compile
 
 A helper tool for batch compile, see [batch-solidity-compiler](https://github.com/FadingRose/batch-compiler)
+
+Step 1 Single Function Fuzzing
+
+A pre fuzzing step, using Contract Creator as message sender
+
+Step 2 Multi-Function Fuzzing
+
+Real fuzzing, using a external attacker as message sender
 

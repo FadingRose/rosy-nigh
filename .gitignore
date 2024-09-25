@@ -61,3 +61,4 @@ testdata
 scripts
 keys.toml
 .cache/
+docs/draft.md

@@ -99,6 +99,8 @@ func (fs *FuncsScheduler) getFuncsSequence() []abi.Method {
 }
 
 func (scheduler *FuncsScheduler) GetSingleFuncList() []abi.Method {
+	// HACK: only returns 'withdraw'
+	return []abi.Method{scheduler.methods["withdraw"]}
 	var ret []abi.Method
 	for _, method := range scheduler.methods {
 		if method.Name == "" || method.StateMutability == "view" {

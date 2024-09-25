@@ -1,7 +1,6 @@
 package fuzz
 
 import (
-	"context"
 	"fadingrose/rosy-nigh/abi"
 	"fadingrose/rosy-nigh/cfg"
 	"fadingrose/rosy-nigh/core"
@@ -11,6 +10,7 @@ import (
 	"fadingrose/rosy-nigh/onchain"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"time"
 
@@ -167,9 +167,9 @@ func execute(contract *Contract, debug bool) error {
 
 	log.Info("Init state snapshot: ", "snapshot", initState)
 
-	timeout := time.Duration(5) * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	// timeout := time.Duration(5) * time.Second
+	// ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// defer cancel()
 
 	sum := newSummary(host.Scheduler.GetSingleFuncList())
 
@@ -186,126 +186,149 @@ func execute(contract *Contract, debug bool) error {
 
 	// NOTE: Stage 1 Single Functional Fuzzing
 	// This step try to fuzz each function, collect the coverage
+
+	epoch1 := 1000
+
 	wg.Add(1)
-	// TODO: thoughout
-	// success call per second
+	fmt.Println("[1/3] Start fuzzing each function")
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				wg.Done()
-				return
-			default:
-				func() {
-					funcs := host.Scheduler.GetSingleFuncList()
-					for _, f := range funcs {
-						// NOTE: Loop for each function until timeout or reach full coverage
-						cnt := 0
+		// for {
+		// 	select {
+		// 	case <-ctx.Done():
+		// 		wg.Done()
+		// 		return
+		// 	default:
+		// func() {
+		funcs := host.Scheduler.GetSingleFuncList()
+		for i, f := range funcs {
+			// NOTE: Loop for each function until timeout or reach full coverage
+			cnt := 0
 
-						initState = host.StateDB.RevertToInitState(initState)
-						for {
+			fmt.Printf(":::[%d/%d] %s ", i+1, len(funcs), f.Name)
+			initState = host.StateDB.RevertToInitState(initState)
+			for {
 
-							throughputTotal++
+				throughputTotal++
 
-							_, funcCover, funcTotal, err := host.FuzzOnce(f)
+				_, funcCover, funcTotal, err := host.FuzzOnce(f)
 
-							if err != nil {
-								sum.Errors = append(sum.Errors, [2]string{"!" + f.Name, err.Error()})
-								break
-							} else {
-								sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
-							}
+				if err == nil && host.Err == nil {
+					sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
+				}
 
-							if host.Err != nil {
-								sum.Errors = append(sum.Errors, [2]string{f.Name, host.Err.Error()})
-								host.Err = nil
-								throughputFail++
-								break
-							}
-							// TODO: measure the meaning value
-							throughputMeanning++
-							throughputSuccess++
+				if err != nil {
+					sum.Errors = append(sum.Errors, [2]string{"!" + f.Name, err.Error()})
+				} else {
+					sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
+				}
 
-							if funcCover == funcTotal {
-								break
-							}
+				if host.Err != nil {
+					sum.Errors = append(sum.Errors, [2]string{f.Name, host.Err.Error()})
+					host.Err = nil
+					throughputFail++
+				}
 
-							cnt++
-							if cnt > 100 {
-								break
-							}
-						}
-					}
-				}()
+				// TODO: measure the meaning value
+				throughputMeanning++
+				throughputSuccess++
+
+				cnt++
+				if cnt > epoch1 {
+					break
+				}
 			}
+
+			fmt.Printf(" [func cov.: %d/%d]\n", sum.FunctionBranchCoverage[f.Name][0], sum.FunctionBranchCoverage[f.Name][1])
 		}
+		wg.Done()
 	}()
 
 	wg.Wait()
 
 	// NOTE: Stage 2 Fuzzing with FuncSequence
+	fmt.Println("[2/3] Start fuzzing FuncSequence with no Retreecy")
+	epoch2 := 1000
 	wg.Add(1)
-	timeout2 := time.Duration(300) * time.Second
-	ctx2, cancel2 := context.WithTimeout(context.Background(), timeout2)
-	defer cancel2()
+	// timeout2 := time.Duration(300) * time.Second
+	// ctx2, cancel2 := context.WithTimeout(context.Background(), timeout2)
+	// defer cancel2()
 
 	go func() {
+		// for {
+		// 	select {
+		// 	case <-ctx2.Done():
+		// 		wg.Done()
+		// 		return
+		// 	default:
+		step := 1
 		for {
-			select {
-			case <-ctx2.Done():
-				wg.Done()
-				return
-			default:
-				func() {
-					funcs, _ := host.Scheduler.GetFuncsSequence(host.CFG.RWMap())
-					fmt.Println("funcs: ", funcs)
-					// for a specific func sequence [A->B->C], assume that we have execute A and B, then we try to go through C
-					initState = host.StateDB.RevertToInitState(initState)
+			funcs, depth := host.Scheduler.GetFuncsSequence(host.CFG.RWMap())
+			if depth > 10 {
+				break
+			}
+			if len(funcs) == 0 {
+				break
+			}
+			// NOTE: we reset statedb to the initial state before execute the func sequence
+			initState = host.StateDB.RevertToInitState(initState)
+			goodflag := true
 
-					for _, f := range funcs {
-						retry := 10
-						halt := false
+			fmt.Printf(":::[%d] %s\n", step, func() string {
+				var ret string
+				for _, f := range funcs {
+					ret += f.Name + ", "
+				}
+				return ret
+			}())
 
-						for retry > 0 {
-							throughputTotal++
-							// WARN: should we reset statedb to the initial state?
-							_, funcCover, funcTotal, err := host.FuzzOnce(f)
+			step++
 
-							// fmt.Println("fuzzing: ", f.Name, funcCover, funcTotal, err, host.Err)
+			for _, f := range funcs {
+				// NOTE: each step has a retry limit, if over the limit, we will stop this funcs sequence and mark it as BadFuncs()
+				retry := epoch2
+				halt := true
 
-							if err == nil && host.Err == nil {
-								sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
-								halt = false
-								throughputSuccess++
-								throughputMeanning++
-								break
-							}
+				for retry > 0 {
 
-							if err != nil {
-								sum.Errors = append(sum.Errors, [2]string{"!" + f.Name, err.Error()})
-							}
-
-							if host.Err != nil {
-								sum.Errors = append(sum.Errors, [2]string{f.Name, host.Err.Error()})
-								host.Err = nil
-								throughputFail++
-							}
-
-							retry--
-						}
-
-						if halt {
-							// DONE: if this funcs sequence is NOT a good one, let Scheduler knows
-							// log.Info("Bad Funcs ", "funcs", funcs)
-							host.Scheduler.BadFuncs()
-							break
-						}
-
-						host.Scheduler.GoodFuncs()
+					throughputTotal++
+					_, funcCover, funcTotal, err := host.FuzzOnce(f)
+					// fmt.Println("funcCover: ", funcCover, "funcTotal: ", funcTotal, "err: ", err, "host.Err: ", host.Err)
+					if err == nil && host.Err == nil {
+						// NOTE: at least executed successfully once
+						halt = false
+						sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
+						throughputSuccess++
+						throughputMeanning++
+						break
 					}
-				}()
+
+					if err != nil {
+						sum.Errors = append(sum.Errors, [2]string{"!" + f.Name, err.Error()})
+					}
+
+					if host.Err != nil {
+						sum.Errors = append(sum.Errors, [2]string{f.Name, host.Err.Error()})
+						host.Err = nil
+						throughputFail++
+					}
+
+					retry--
+				}
+
+				if halt {
+					goodflag = false
+					break
+				}
+
+			}
+
+			if goodflag {
+				host.Scheduler.GoodFuncs()
+			} else {
+				host.Scheduler.BadFuncs()
 			}
 		}
+		wg.Done()
 	}()
 
 	wg.Wait()
@@ -322,15 +345,13 @@ func execute(contract *Contract, debug bool) error {
 	sum.CFGCoverage = host.CFG.CoverageString()
 	sum.FunctionAcceessList = host.CFG.AccessList()
 
-	fmt.Printf("Contract Owner: %s\nDeploy at: %s\nAttacker: %s\n", host.OwnerAddress.Hex(), host.DeployAt.Hex(), host.Attackers[0].Hex())
-
-	fmt.Println(sum.string())
-
-	fmt.Println(host.CFG.String())
-
-	fmt.Println(host.Oracle.HumanReport())
-
-	fmt.Println(host.Mutator.String())
+	sum.saveToFile(
+		fmt.Sprintf("Contract Owner: %s\nDeploy at: %s\nAttacker: %s\n", host.OwnerAddress.Hex(), host.DeployAt.Hex(), host.Attackers[0].Hex()),
+		fmt.Sprintln(sum.string()),
+		fmt.Sprintln(host.CFG.String()),
+		fmt.Sprintln(host.Oracle.HumanReport()),
+		fmt.Sprintln(host.Mutator.String()),
+	)
 
 	return nil
 }
@@ -373,6 +394,24 @@ func newSummary(funcs []abi.Method) summary {
 			meanning: 0,
 			duration: 0,
 		},
+	}
+}
+
+func (s summary) saveToFile(contents ...string) {
+	fileName := fmt.Sprintf("summary_%s.log", time.Now().Format("20060102150405"))
+	file, err := os.Create(fileName)
+	if err != nil {
+		log.Error("Failed to create summary file: ", err)
+		return
+	}
+	defer file.Close()
+
+	for _, content := range contents {
+		_, err := file.WriteString(content)
+		if err != nil {
+			log.Error("Failed to write to summary file: ", err)
+			return
+		}
 	}
 }
 
