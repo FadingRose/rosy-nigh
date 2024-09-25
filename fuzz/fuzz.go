@@ -2,7 +2,6 @@ package fuzz
 
 import (
 	"fadingrose/rosy-nigh/abi"
-	"fadingrose/rosy-nigh/cfg"
 	"fadingrose/rosy-nigh/core"
 	"fadingrose/rosy-nigh/core/state"
 	"fadingrose/rosy-nigh/core/vm"
@@ -10,7 +9,6 @@ import (
 	"fadingrose/rosy-nigh/onchain"
 	"fmt"
 	"math/big"
-	"os"
 	"sync"
 	"time"
 
@@ -187,7 +185,10 @@ func execute(contract *Contract, debug bool) error {
 	// NOTE: Stage 1 Single Functional Fuzzing
 	// This step try to fuzz each function, collect the coverage
 
-	epoch1 := 1000
+	var (
+		sender1 = host.OwnerAddress
+		epoch1  = 1000
+	)
 
 	wg.Add(1)
 	fmt.Println("[1/3] Start fuzzing each function")
@@ -210,7 +211,7 @@ func execute(contract *Contract, debug bool) error {
 
 				throughputTotal++
 
-				_, funcCover, funcTotal, err := host.FuzzOnce(f)
+				_, funcCover, funcTotal, err := host.FuzzOnce(f, sender1)
 
 				if err == nil && host.Err == nil {
 					sum.FunctionBranchCoverage[f.Name] = [2]int{funcCover, funcTotal}
@@ -245,9 +246,30 @@ func execute(contract *Contract, debug bool) error {
 
 	wg.Wait()
 
+	func() {
+		duration := time.Since(start)
+		sum.Throughput = throughput{
+			total:    throughputTotal,
+			success:  throughputSuccess,
+			fail:     throughputFail,
+			meanning: throughputMeanning,
+			duration: duration,
+		}
+		sum.CFGCoverage = host.CFG.CoverageString()
+		sum.FunctionAcceessList = host.CFG.AccessList()
+		sum.saveToFile(
+			"Stage 1 Single Funcs Fuzz",
+			fmt.Sprintln(sum.string()),
+		)
+	}()
+
 	// NOTE: Stage 2 Fuzzing with FuncSequence
 	fmt.Println("[2/3] Start fuzzing FuncSequence with no Retreecy")
-	epoch2 := 1000
+
+	var (
+		sender2 = host.Attackers[0]
+		epoch2  = 1000
+	)
 	wg.Add(1)
 	// timeout2 := time.Duration(300) * time.Second
 	// ctx2, cancel2 := context.WithTimeout(context.Background(), timeout2)
@@ -291,7 +313,7 @@ func execute(contract *Contract, debug bool) error {
 				for retry > 0 {
 
 					throughputTotal++
-					_, funcCover, funcTotal, err := host.FuzzOnce(f)
+					_, funcCover, funcTotal, err := host.FuzzOnce(f, sender2)
 					// fmt.Println("funcCover: ", funcCover, "funcTotal: ", funcTotal, "err: ", err, "host.Err: ", host.Err)
 					if err == nil && host.Err == nil {
 						// NOTE: at least executed successfully once
@@ -346,7 +368,7 @@ func execute(contract *Contract, debug bool) error {
 	sum.FunctionAcceessList = host.CFG.AccessList()
 
 	sum.saveToFile(
-		fmt.Sprintf("Contract Owner: %s\nDeploy at: %s\nAttacker: %s\n", host.OwnerAddress.Hex(), host.DeployAt.Hex(), host.Attackers[0].Hex()),
+		fmt.Sprintf("Stage 2 Funcs Sequence", "Contract Owner: %s\nDeploy at: %s\nAttacker: %s\n", host.OwnerAddress.Hex(), host.DeployAt.Hex(), host.Attackers[0].Hex()),
 		fmt.Sprintln(sum.string()),
 		fmt.Sprintln(host.CFG.String()),
 		fmt.Sprintln(host.Oracle.HumanReport()),
@@ -354,101 +376,4 @@ func execute(contract *Contract, debug bool) error {
 	)
 
 	return nil
-}
-
-type throughput struct {
-	total    uint64 // total calls
-	success  uint64 // calls with Return
-	fail     uint64 // calls without Return, but Revert error
-	meanning uint64 // calls with Return, and reach the target
-
-	duration time.Duration
-}
-
-type summary struct {
-	FunctionBranchCoverage map[string][2]int
-	FunctionAcceessList    map[string][]cfg.SlotAccess
-	CFGCoverage            string
-	Errors                 [][2]string
-	Throughput             throughput
-}
-
-func newSummary(funcs []abi.Method) summary {
-	fbc := func() map[string][2]int {
-		ret := make(map[string][2]int)
-		for _, f := range funcs {
-			ret[f.Name] = [2]int{-1, 0}
-		}
-		return ret
-	}()
-
-	return summary{
-		FunctionBranchCoverage: fbc,
-		FunctionAcceessList:    make(map[string][]cfg.SlotAccess),
-		CFGCoverage:            "",
-		Errors:                 make([][2]string, 0),
-		Throughput: throughput{
-			total:    0,
-			success:  0,
-			fail:     0,
-			meanning: 0,
-			duration: 0,
-		},
-	}
-}
-
-func (s summary) saveToFile(contents ...string) {
-	fileName := fmt.Sprintf("summary_%s.log", time.Now().Format("20060102150405"))
-	file, err := os.Create(fileName)
-	if err != nil {
-		log.Error("Failed to create summary file: ", err)
-		return
-	}
-	defer file.Close()
-
-	for _, content := range contents {
-		_, err := file.WriteString(content)
-		if err != nil {
-			log.Error("Failed to write to summary file: ", err)
-			return
-		}
-	}
-}
-
-func (s summary) string() string {
-	errStr := ""
-	for _, parts := range s.Errors {
-		errStr += "| " + parts[0] + "->" + parts[1] + "\n"
-	}
-	funcCoverageStr := ""
-	for name, coverage := range s.FunctionBranchCoverage {
-		funcCoverageStr += fmt.Sprintf("|->%s: %d/%d\n", name, coverage[0], coverage[1])
-	}
-	funcSlotAccessStr := ""
-	for name, accessList := range s.FunctionAcceessList {
-		funcSlotAccessStr += "|->" + name + ":\n"
-		// readlistStr := ""
-		// writeListStr := ""
-		last := ""
-		for _, access := range accessList {
-			if last == access.String() {
-				continue
-			}
-			last = access.String()
-			funcSlotAccessStr += fmt.Sprintf("|->%s\n", access.String())
-			// if access.AccessType == cfg.Read {
-			// 	readlistStr += fmt.Sprintf("|->%s\n", access.String())
-			// } else {
-			// 	writeListStr += fmt.Sprintf("|->%s\n", access.String())
-			// }
-		}
-	}
-	throughputStr := ""
-	if s.Throughput.total > 0 {
-		totalQps := float64(s.Throughput.total) / s.Throughput.duration.Seconds()
-		sucQps := float64(s.Throughput.success) / s.Throughput.duration.Seconds()
-		meanQps := float64(s.Throughput.meanning) / s.Throughput.duration.Seconds()
-		throughputStr = fmt.Sprintf("|->Total: %d, Success: %d, Fail: %d, Meanning: %d\n|->QPS: %.2f, SuccessQPS: %.2f, MeanningQPS: %.2f\n", s.Throughput.total, s.Throughput.success, s.Throughput.fail, s.Throughput.meanning, totalQps, sucQps, meanQps)
-	}
-	return fmt.Sprintf("> Throughput:\n%s\n> FunctionBranchCoverage:\n%v\n> CFGCoverage: %s> FunctionSlotAccessList:\n%s\n> Errors:\n%v", throughputStr, funcCoverageStr, s.CFGCoverage, funcSlotAccessStr, errStr)
 }

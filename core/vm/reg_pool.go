@@ -59,6 +59,10 @@ func (rk *RegKey) IsMagic() bool {
 	return rk.Instance().IsMagic()
 }
 
+func (rk *RegKey) IsBarrier() bool {
+	return rk.Instance().IsBarrier()
+}
+
 // Duplicate supports opcode DUP
 func (rk *RegKey) Duplicate() *RegKey {
 	return &RegKey{

@@ -96,6 +96,21 @@ func (r *Reg) IsMagic() bool {
 	return false
 }
 
+// IsBarrier returns true if the reg is a barrier, which means the reg is READ from memory/slot/tslot
+func (r *Reg) IsBarrier() bool {
+	bops := []OpCode{
+		MLOAD,
+		SLOAD,
+		TLOAD,
+	}
+	for _, op := range bops {
+		if r.op == op {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Reg) expand(depth int) string {
 	if depth > 1024 {
 		log.Warn("reg expand overflow, depth > 1024")

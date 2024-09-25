@@ -293,7 +293,7 @@ func (host *FuzzHost) RunForDeploy() {
 	}
 }
 
-func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCovered int, funcTotal int, fzerr error) {
+func (host *FuzzHost) FuzzOnce(method abi.Method, sender common.Address) (runtimePath *cfg.Path, funcCovered int, funcTotal int, fzerr error) {
 	// 0. Generate Sender's receive()
 	// 1. Generate parameters
 	//    1.a Create ArgIndexList for params
@@ -306,8 +306,9 @@ func (host *FuzzHost) FuzzOnce(method abi.Method) (runtimePath *cfg.Path, funcCo
 	//    5.c send to SMT, desire a better input / magic number
 
 	var (
-		nonce    = host.StateDB.GetNonce(host.OwnerAddress)
-		from     = host.Attackers[0]
+		nonce = host.StateDB.GetNonce(host.OwnerAddress)
+		// from     = host.Attackers[0]
+		from     = sender
 		to       = host.DeployAt
 		amount   = host.Mutator.GenerateCallValue()
 		gasLimit = uint64(1000000)
@@ -480,8 +481,11 @@ func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey
 			// NOTE: for now, we only impl branch coverage
 			for _, relie := range relies {
 				// log.Debug(fmt.Sprintf("relies: %s <- %s", relie.OpCode(), relie.IndexString()))
+				if relie.IsBarrier() {
+					fmt.Println("WARNING: relie is barrier at ", relie.String())
+					fmt.Println(rk.Expand())
+				}
 
-				// bind argument
 				if _, ok := isBind(relie); ok {
 					coverd, total := host.CFG.BranchCoverageLine(rk.PC())
 					// fmt.Printf("Branch coverage at %d: %d/%d\n", rk.PC(), coverd, total)
