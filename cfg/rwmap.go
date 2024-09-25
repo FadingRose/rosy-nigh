@@ -230,6 +230,15 @@ func (rwMap *RWMap) Visit(depth int) []string {
 	return ret
 }
 
+// Nodes returns all nodes in the graph by name
+func (rwMap *RWMap) Nodes() []string {
+	var ret []string
+	for _, n := range rwMap.nodes {
+		ret = append(ret, n.name)
+	}
+	return ret
+}
+
 // entries returns all nodes which are the entry of the graph, means they are not deps of any other nodes
 func (rwMap *RWMap) entries() []*node {
 	entries := make([]*node, 0)

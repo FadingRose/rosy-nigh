@@ -257,7 +257,7 @@ func execute(contract *Contract, debug bool) error {
 				return
 			default:
 				func() {
-					funcs := host.Scheduler.GetFuncsSequence(host.CFG.RWMap())
+					funcs, _ := host.Scheduler.GetFuncsSequence(host.CFG.RWMap())
 					fmt.Println("funcs: ", funcs)
 					// for a specific func sequence [A->B->C], assume that we have execute A and B, then we try to go through C
 					initState = host.StateDB.RevertToInitState(initState)

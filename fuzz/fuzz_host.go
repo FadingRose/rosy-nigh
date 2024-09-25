@@ -35,7 +35,7 @@ type Solver interface {
 }
 
 type Scheduler interface {
-	GetFuncsSequence(rwmap *cfg.RWMap) []abi.Method
+	GetFuncsSequence(rwmap *cfg.RWMap) ([]abi.Method, int)
 	GetSingleFuncList() []abi.Method
 	BadFuncs()
 	GoodFuncs()
