@@ -6,6 +6,10 @@ import (
 	"github.com/holiman/uint256"
 )
 
+func Executor(op vm.OpCode) func(me *operation) *uint256.Int {
+	return executor(op)
+}
+
 func executor(op vm.OpCode) func(me *operation) *uint256.Int {
 	if op.IsPush() {
 		return func(me *operation) *uint256.Int {

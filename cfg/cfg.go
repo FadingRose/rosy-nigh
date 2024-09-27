@@ -1,17 +1,29 @@
 package cfg
 
 import (
+	"encoding/binary"
+	"fadingrose/rosy-nigh/cfg/symbolic"
 	"fadingrose/rosy-nigh/core/asm"
 	"fadingrose/rosy-nigh/core/vm"
 	"fadingrose/rosy-nigh/log"
 	"fmt"
+	"hash/fnv"
+	"os"
+	"runtime"
+	"sync"
+	"sync/atomic"
+
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 )
 
 type CFG struct {
 	Blocks   []*Block // blocks[0] is entry; order otherwise undefined
 	PathDict *PathDict
 
-	blockMap     map[uint64]*Block
+	blockMap        map[uint64]*Block
+	directSuccessor map[uint64]*Block
+
 	slotCoverage SlotCoverage
 
 	accessList map[string][]SlotAccess
@@ -25,9 +37,10 @@ func NewCFG(bytecode []byte) *CFG {
 		sloadTotal  = 0
 	)
 	cur := newBlock(0)
-	cur.Live = true // start collect statements from root
+	cur.Selector = true // start collect statements from root
 
 	blockmap := make(map[uint64]*Block)
+	directSuccessor := make(map[uint64]*Block)
 	it := asm.NewInstructionIterator(bytecode)
 	nxtit := asm.NewInstructionIterator(bytecode)
 	nxtit.Next()
@@ -57,6 +70,15 @@ func NewCFG(bytecode []byte) *CFG {
 		}
 
 		blockmap[it.PC()] = cur
+	}
+
+	for i := 0; i < len(blocks)-1; i++ {
+		ls := blocks[i].LastStmt()
+		if ls.op != vm.JUMPI {
+			continue
+		}
+		fmt.Printf("ls.pc %d -> ds.pc %d\n", ls.pc, blocks[i+1].FirstStmt().pc)
+		directSuccessor[ls.pc] = blocks[i+1]
 	}
 
 	return &CFG{
@@ -259,6 +281,10 @@ func (cfg *CFG) visitJMPI(pc, dest, cond uint64) {
 	}
 }
 
+func (cfg *CFG) lastPC() uint64 {
+	return cfg.Blocks[len(cfg.Blocks)-1].LastStmt().PC()
+}
+
 func (cfg *CFG) ExtractPath(reglist []vm.RegKey) *Path {
 	from_pc := uint64(0)
 
@@ -342,6 +368,205 @@ func (cfg *CFG) AccessList() map[string][]SlotAccess {
 }
 
 func (cfg *CFG) SymbolicResolve() {
+	var (
+		inter *symbolic.SymbolicInterpreter
+		lut   = make(map[uint64]*symbolic.Operation, 0)
+		table = vm.NewVerkleInstructionSet()
+	)
+
+	for _, block := range cfg.Blocks {
+		for _, stmt := range block.Stmt {
+			op := stmt.op
+			minst, maxst := table[op].Instance().StackSize()
+			lut[stmt.PC()] = symbolic.NewOperation(
+				minst,
+				int(params.StackLimit)+minst-maxst,
+				op,
+				stmt.PC(),
+				stmt.Value(),
+				symbolic.Executor(op))
+		}
+	}
+
+	pathes := cfg.entryPathes()
+	inter = symbolic.NewSymbolicInterpreter(lut)
+
+	sp := &safepathes{
+		pathes: pathes,
+		mu:     sync.Mutex{},
+	}
+
+	var wg sync.WaitGroup
+	workerCount := runtime.GOMAXPROCS(0)
+
+	// log.Debug(cfg.String())
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				curPath, ok := sp.get()
+				if !ok {
+					return
+				}
+
+				stmts := func(path []uint64) []uint64 {
+					var ret []uint64
+					for _, pc := range path {
+						block := cfg.BlockMap(pc)
+						for _, stmt := range block.Stmt {
+							ret = append(ret, stmt.PC())
+						}
+					}
+					return ret
+				}(curPath)
+
+				if len(stmts) == 0 {
+					continue
+				}
+
+				dest, halt, err := inter.Run(stmts)
+				if err != nil {
+					continue
+				}
+
+				// reached REVERT | RETURN | STOP | INVALID
+				if halt {
+					continue
+				}
+
+				if dest != nil {
+					if destBlock := cfg.blockMap[dest.Uint64()]; destBlock != nil {
+						destBlock.Discovered()
+						np := append(curPath, destBlock.FirstStmt().PC())
+						sp.append(np)
+					}
+				}
+
+				if ds := cfg.directSuccessor[stmts[len(stmts)-1]]; ds != nil {
+					ds.Discovered()
+					np := append(curPath, ds.FirstStmt().PC())
+					sp.append(np)
+				}
+
+				// directSuccessorPC := stmts[len(stmts)-1] + 1
+				// if directSuccessorPC <= cfg.lastPC() {
+				// 	if dsBlock := cfg.blockMap[directSuccessorPC]; dsBlock != nil {
+				// 		dsBlock.Discovered()
+				// 		// fmt.Println("dsBlock", directSuccessorPC)
+				// 		np := append(curPath, dsBlock.FirstStmt().PC())
+				// 		sp.append(np)
+				// 	}
+				// }
+
+			}
+		}()
+	}
+
+	wg.Wait()
+	fmt.Println(sp.string())
+	fmt.Println(cfg.String())
+	os.Exit(1)
 }
 
-func (cfg *CFG) functionSelectors() {}
+func (cfg *CFG) entryPathes() [][]uint64 {
+	var (
+		entries [][]uint64
+		prefix  []uint64
+	)
+
+	destFromSelector := func(b *Block) *uint256.Int {
+		for i, stmt := range b.Stmt {
+			if stmt.op == vm.PUSH2 {
+				if b.Stmt[i+1].op == vm.JUMPI || b.Stmt[i+1].op == vm.JUMP {
+					b.Selector = true
+					return stmt.Value()
+				}
+			}
+			if stmt.op == vm.STOP {
+				b.Selector = true
+			}
+		}
+		return nil
+	}
+
+	for _, block := range cfg.Blocks {
+		prefix = append(prefix, block.FirstStmt().PC())
+
+		if len(prefix) == 1 {
+			continue
+		}
+
+		path := make([]uint64, len(prefix))
+		copy(path, prefix)
+
+		if dest := destFromSelector(block); dest == nil {
+			break
+		} else {
+			if nxt := cfg.BlockMap(dest.Uint64()); nxt == nil {
+				log.Debug("function selector with a invalid jump destination", "dest", dest.Hex())
+			} else {
+				path = append(path, nxt.FirstStmt().PC())
+				entries = append(entries, path)
+			}
+		}
+	}
+
+	return entries
+}
+
+type safepathes struct {
+	mu         sync.Mutex
+	pathes     [][]uint64
+	pathHashes map[uint64]struct{}
+	index      int32
+}
+
+func (sp *safepathes) append(path []uint64) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	hash := sp.hashPath(path)
+	if _, exists := sp.pathHashes[hash]; !exists {
+		sp.pathes = append(sp.pathes, path)
+	}
+}
+
+func (sp *safepathes) len() int {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	return len(sp.pathes)
+}
+
+func (sp *safepathes) get() ([]uint64, bool) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	// fmt.Println("sp.index", sp.index)
+	idx := int(atomic.LoadInt32(&sp.index))
+
+	if idx >= len(sp.pathes) {
+		return nil, false
+	}
+
+	defer atomic.AddInt32(&sp.index, 1)
+
+	return sp.pathes[idx], true
+}
+
+func (sp *safepathes) hashPath(path []uint64) uint64 {
+	h := fnv.New64a()
+	for _, pc := range path {
+		binary.Write(h, binary.LittleEndian, pc)
+	}
+	return h.Sum64()
+}
+
+func (sp *safepathes) string() string {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	var ret string
+	for _, path := range sp.pathes {
+		ret += fmt.Sprintf("%v\n", path)
+	}
+	return ret
+}

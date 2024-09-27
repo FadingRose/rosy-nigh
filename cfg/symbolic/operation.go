@@ -9,6 +9,27 @@ import (
 	"github.com/holiman/uint256"
 )
 
+type Operation struct {
+	o *operation
+}
+
+func NewOperation(paramSize int, pushbackSize int, op vm.OpCode, pc uint64, val *uint256.Int, exec func(me *operation) *uint256.Int) *Operation {
+	return &Operation{
+		o: &operation{
+			paramSize:    paramSize,
+			pushbackSize: pushbackSize,
+			op:           op,
+			pc:           pc,
+			val:          val,
+			exec:         exec,
+		},
+	}
+}
+
+func (O *Operation) instance() *operation {
+	return O.o
+}
+
 type operation struct {
 	paramSize    int
 	pushbackSize int
