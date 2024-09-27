@@ -72,6 +72,10 @@ func (r *Reg) OpCode() OpCode {
 	return r.op
 }
 
+func (c *Reg) Slot() uint256.Int {
+	return c.slotkey
+}
+
 func (r *Reg) RegKey() RegKey {
 	return RegKey{
 		index: r.index,

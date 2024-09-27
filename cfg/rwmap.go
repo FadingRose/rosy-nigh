@@ -41,7 +41,7 @@ func (kvs *kvs) exist(key, value *uint256.Int) bool {
 }
 
 type node struct {
-	name string
+	name string // `name` is the contract function name
 	r    *kvs
 	w    *kvs
 
@@ -140,6 +140,7 @@ func (rwMap *RWMap) check(key, value *uint256.Int, acc AccessType) ([]*node, boo
 		deps = make([]*node, 0)
 		ok   = false
 	)
+
 	for _, n := range rwMap.nodes {
 		if acc == Read && n.r.exist(key, value) {
 			deps = append(deps, n)
@@ -152,6 +153,30 @@ func (rwMap *RWMap) check(key, value *uint256.Int, acc AccessType) ([]*node, boo
 		}
 	}
 	return deps, ok
+}
+
+// Filter returns all function name that access the key with the given access type
+func (rwMap *RWMap) Filter(key *uint256.Int, acc AccessType) ([]string, bool) {
+	var (
+		ret  []string
+		flag = false
+	)
+
+	for _, n := range rwMap.nodes {
+		var kvs *kvs
+		if acc == Read {
+			kvs = n.r
+		} else {
+			kvs = n.w
+		}
+
+		if kvs.find(*key) != nil {
+			ret = append(ret, n.name)
+			flag = true
+		}
+	}
+
+	return ret, flag
 }
 
 func (rwMap *RWMap) String() string {

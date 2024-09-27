@@ -134,15 +134,19 @@ func Execute(contractFolder string, debug bool) error {
 	return nil
 }
 
-// NOTE: Entry point for a fuzzing task
-//  0. set timeout, deploy
-//  1. get funcs sequence from scheduler
-//  2. for each func in funcs, run fuzz
-//  3. summary:
-//     3.a function branch coverage
-//     3.b total branch coverage and statement coverage
-//     3.c error
+// execute is the internal entry point for a fuzz task
 func execute(contract *Contract, debug bool) error {
+	// NOTE: Entry point for a fuzzing task
+	//  0. Create ERE then deploy
+	//  1. Symbolic resolve CFG
+	//  2. Fuzzing
+	//    2.a Contract Creator as msg.sender, link-generation function sequence
+	//    2.b External Address(Attacker[0]) as msg.sender, link-generation function sequence
+	//    2.c External Address(Attacker) as msg.sender, R/W guided generation function sequence, enable reentrancy
+	//  3. summary:
+	//     3.a function branch coverage
+	//     3.b total branch coverage and statement coverage
+	//     3.c error
 	var (
 		host      *FuzzHost
 		initState int
@@ -154,6 +158,8 @@ func execute(contract *Contract, debug bool) error {
 		}
 	}()
 
+	// NOTE: 0 Create ERE then deploy
+	fmt.Println("[1/4]Create ERE then deploy")
 	statedb, blockCtx, chainConfig, config := CreateEVMRuntimeEnironment()
 	host = NewFuzzHost(contract, statedb, blockCtx, chainConfig, config)
 
@@ -165,14 +171,16 @@ func execute(contract *Contract, debug bool) error {
 
 	log.Info("Init state snapshot: ", "snapshot", initState)
 
-	// timeout := time.Duration(5) * time.Second
-	// ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	// defer cancel()
+	// NOTE: 1 Symbolic resolve CFG
+	fmt.Println("[2/4]Symbolic resolve CFG")
+	// host.WishSolver.SymbolicResolveCFG()
+	host.CFG.SymbolicResolve()
 
-	sum := newSummary(host.Scheduler.GetSingleFuncList())
-
+	// NOTE: 2.a Fuzz Stage 1 Single Functional Fuzzing
+	// This step try to fuzz each function, collect the coverage
 	var wg sync.WaitGroup
 
+	sum := newSummary(host.Scheduler.GetSingleFuncList())
 	var (
 		throughputTotal    uint64
 		throughputSuccess  uint64
@@ -182,16 +190,13 @@ func execute(contract *Contract, debug bool) error {
 
 	start := time.Now()
 
-	// NOTE: Stage 1 Single Functional Fuzzing
-	// This step try to fuzz each function, collect the coverage
-
 	var (
 		sender1 = host.OwnerAddress
 		epoch1  = 1000
 	)
 
 	wg.Add(1)
-	fmt.Println("[1/3] Start fuzzing each function")
+	fmt.Println("[3/4]Start fuzzing each function")
 	go func() {
 		// for {
 		// 	select {

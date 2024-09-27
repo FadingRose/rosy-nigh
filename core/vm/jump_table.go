@@ -13,6 +13,14 @@ type (
 	memorySizeFunc func(*Stack) (size uint64, overflow bool)
 )
 
+type Operation struct {
+	this *operation
+}
+
+func (o *Operation) StackSize() (min int, max int) {
+	return o.this.minStack, o.this.maxStack
+}
+
 type operation struct {
 	// execute is the operation function
 	execute     executionFunc
@@ -26,6 +34,12 @@ type operation struct {
 
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
+}
+
+func (o *operation) Instance() *Operation {
+	return &Operation{
+		this: o,
+	}
 }
 
 var (
@@ -63,6 +77,10 @@ func validate(jt JumpTable) JumpTable {
 		}
 	}
 	return jt
+}
+
+func NewVerkleInstructionSet() JumpTable {
+	return newVerkleInstructionSet()
 }
 
 func newVerkleInstructionSet() JumpTable {

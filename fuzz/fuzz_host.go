@@ -34,6 +34,10 @@ type Solver interface {
 	AddExclusion(name string, val *big.Int)
 }
 
+type WishSolver interface {
+	AppendWishList(rk *vm.RegKey)
+}
+
 type Scheduler interface {
 	GetFuncsSequence(rwmap *cfg.RWMap) ([]abi.Method, int)
 	GetSingleFuncList() []abi.Method
@@ -58,6 +62,7 @@ type FuzzHost struct {
 
 	Mutator
 	Solver
+	WishSolver
 	Scheduler // FunctionScheduler
 	Oracle
 
@@ -103,10 +108,11 @@ func NewFuzzHost(target *Contract, statedb *state.StateDB, blockCtx vm.BlockCont
 
 		Mutator: mutator,
 
-		Target:    target,
-		Solver:    solver,
-		Scheduler: scheduler,
-		Oracle:    oracle,
+		Target:     target,
+		Solver:     solver,
+		WishSolver: nil,
+		Scheduler:  scheduler,
+		Oracle:     oracle,
 
 		CFG:         nil,
 		runtimeCode: make([]byte, 0),
@@ -172,6 +178,7 @@ func (host *FuzzHost) RunForDeployOnchain() {
 		host.DeployAt = result.ContractAddr
 		host.runtimeCode = result.ReturnData
 		host.CFG = cfg.NewCFG(host.runtimeCode)
+		host.WishSolver = smt.NewWishSolver(host.CFG)
 		log.Info(fmt.Sprintf("deploy success at %s", host.DeployAt.Hex()))
 	} else {
 		log.Warn("Failed: ", "err", host.Err, "name", host.Target.Name)
@@ -484,6 +491,8 @@ func (host *FuzzHost) wrapCandidates(argList []abi.ArgIndex, regList []vm.RegKey
 				if relie.IsBarrier() {
 					fmt.Println("WARNING: relie is barrier at ", relie.String())
 					fmt.Println(rk.Expand())
+
+					host.WishSolver.AppendWishList(&relie)
 				}
 
 				if _, ok := isBind(relie); ok {
