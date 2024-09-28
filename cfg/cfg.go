@@ -1,17 +1,14 @@
 package cfg
 
 import (
-	"encoding/binary"
 	"fadingrose/rosy-nigh/cfg/symbolic"
 	"fadingrose/rosy-nigh/core/asm"
 	"fadingrose/rosy-nigh/core/vm"
 	"fadingrose/rosy-nigh/log"
 	"fmt"
-	"hash/fnv"
 	"os"
 	"runtime"
 	"sync"
-	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -77,6 +74,7 @@ func NewCFG(bytecode []byte) *CFG {
 		if ls.op != vm.JUMPI {
 			continue
 		}
+		// HACK:
 		fmt.Printf("ls.pc %d -> ds.pc %d\n", ls.pc, blocks[i+1].FirstStmt().pc)
 		directSuccessor[ls.pc] = blocks[i+1]
 	}
@@ -85,7 +83,8 @@ func NewCFG(bytecode []byte) *CFG {
 		Blocks:   blocks,
 		PathDict: NewPathDict(),
 
-		blockMap: blockmap,
+		blockMap:        blockmap,
+		directSuccessor: directSuccessor,
 		slotCoverage: SlotCoverage{
 			0, sstoreTotal, 0, sloadTotal,
 		},
@@ -392,14 +391,16 @@ func (cfg *CFG) SymbolicResolve() {
 	inter = symbolic.NewSymbolicInterpreter(lut)
 
 	sp := &safepathes{
-		pathes: pathes,
-		mu:     sync.Mutex{},
+		pathes:     pathes,
+		mu:         sync.Mutex{},
+		pathHashes: make(map[uint64]struct{}),
+		index:      int32(0),
+		maxdepth:   len(cfg.Blocks) + 1,
 	}
 
 	var wg sync.WaitGroup
 	workerCount := runtime.GOMAXPROCS(0)
-
-	// log.Debug(cfg.String())
+	// workerCount := 1
 
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
@@ -407,6 +408,7 @@ func (cfg *CFG) SymbolicResolve() {
 			defer wg.Done()
 			for {
 				curPath, ok := sp.get()
+
 				if !ok {
 					return
 				}
@@ -440,6 +442,7 @@ func (cfg *CFG) SymbolicResolve() {
 					if destBlock := cfg.blockMap[dest.Uint64()]; destBlock != nil {
 						destBlock.Discovered()
 						np := append(curPath, destBlock.FirstStmt().PC())
+						// fmt.Printf("cur: %v dt: %v\n", curPath, np)
 						sp.append(np)
 					}
 				}
@@ -447,18 +450,10 @@ func (cfg *CFG) SymbolicResolve() {
 				if ds := cfg.directSuccessor[stmts[len(stmts)-1]]; ds != nil {
 					ds.Discovered()
 					np := append(curPath, ds.FirstStmt().PC())
+					// fmt.Println("ds: ", np)
+					// fmt.Printf("cur: %v ds: %v\n", curPath, np)
 					sp.append(np)
 				}
-
-				// directSuccessorPC := stmts[len(stmts)-1] + 1
-				// if directSuccessorPC <= cfg.lastPC() {
-				// 	if dsBlock := cfg.blockMap[directSuccessorPC]; dsBlock != nil {
-				// 		dsBlock.Discovered()
-				// 		// fmt.Println("dsBlock", directSuccessorPC)
-				// 		np := append(curPath, dsBlock.FirstStmt().PC())
-				// 		sp.append(np)
-				// 	}
-				// }
 
 			}
 		}()
@@ -514,59 +509,4 @@ func (cfg *CFG) entryPathes() [][]uint64 {
 	}
 
 	return entries
-}
-
-type safepathes struct {
-	mu         sync.Mutex
-	pathes     [][]uint64
-	pathHashes map[uint64]struct{}
-	index      int32
-}
-
-func (sp *safepathes) append(path []uint64) {
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	hash := sp.hashPath(path)
-	if _, exists := sp.pathHashes[hash]; !exists {
-		sp.pathes = append(sp.pathes, path)
-	}
-}
-
-func (sp *safepathes) len() int {
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	return len(sp.pathes)
-}
-
-func (sp *safepathes) get() ([]uint64, bool) {
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	// fmt.Println("sp.index", sp.index)
-	idx := int(atomic.LoadInt32(&sp.index))
-
-	if idx >= len(sp.pathes) {
-		return nil, false
-	}
-
-	defer atomic.AddInt32(&sp.index, 1)
-
-	return sp.pathes[idx], true
-}
-
-func (sp *safepathes) hashPath(path []uint64) uint64 {
-	h := fnv.New64a()
-	for _, pc := range path {
-		binary.Write(h, binary.LittleEndian, pc)
-	}
-	return h.Sum64()
-}
-
-func (sp *safepathes) string() string {
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	var ret string
-	for _, path := range sp.pathes {
-		ret += fmt.Sprintf("%v\n", path)
-	}
-	return ret
 }

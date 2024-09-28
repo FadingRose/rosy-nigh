@@ -38,6 +38,8 @@ type operation struct {
 	val          *uint256.Int
 	params       []*operation
 
+	cp *operation
+
 	exec func(me *operation) *uint256.Int
 }
 
@@ -56,6 +58,7 @@ func (o *operation) dup() *operation {
 		op:           o.op,
 		pc:           o.pc,
 		val:          o.val,
+		cp:           o.cp,
 	}
 }
 
@@ -79,6 +82,12 @@ func (o *operation) expand(depth int) string {
 		log.Warn("reg expand overflow, depth > 1024")
 		return ""
 	}
+
+	to := o
+	for to.cp != nil {
+		to = to.cp
+	}
+
 	var builder strings.Builder
 	// indentation for the tree structure
 	indent := strings.Repeat(".", 6)
@@ -103,22 +112,22 @@ func (o *operation) expand(depth int) string {
 	}
 
 	val := "<nil>"
-	if o.val != nil {
-		val = o.val.Hex()
+	if to.val != nil {
+		val = to.val.Hex()
 	}
 
 	if depth == 0 {
-		builder.WriteString(fmt.Sprintf("%s\n", nameWithOp(o)))
+		builder.WriteString(fmt.Sprintf("%s\n", nameWithOp(to)))
 	} else {
 		// Write the current node
-		builder.WriteString(fmt.Sprintf("%s   └── %s <- %s\n", indents, nameWithOp(o), val))
+		builder.WriteString(fmt.Sprintf("%s   └── %s <- %s\n", indents, nameWithOp(to), val))
 	}
 
-	if isSkip(o.op) {
+	if isSkip(to.op) {
 		return builder.String()
 	}
 
-	for _, it := range o.params {
+	for _, it := range to.params {
 		builder.WriteString(it.expand(depth + 1))
 	}
 

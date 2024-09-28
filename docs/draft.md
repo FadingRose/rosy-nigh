@@ -81,3 +81,20 @@
 ## Symbolic CFG Solver
 
 
+(discover)Block 213:
+        0x17e1(6113) POP  
+        0x17e2(6114) CALLER  
+        0x17e3(6115) PUSH20 0xffffffffffffffffffffffffffffffffffffffff 
+        0x17f8(6136) AND  
+        0x17f9(6137) DUP3  
+        0x17fa(6138) PUSH20 0xffffffffffffffffffffffffffffffffffffffff 
+        0x180f(6159) AND  
+        0x1810(6160) EQ  
+        0x1811(6161) ISZERO  
+
+(discover)Block 214:
+        0x1812(6162) JUMPDEST  
+        0x1813(6163) DUP1  
+        0x1814(6164) ISZERO  
+        0x1815(6165) PUSH2 0x1823 
+        0x1818(6168) JUMPI  

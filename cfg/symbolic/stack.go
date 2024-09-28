@@ -62,6 +62,7 @@ func (s *stack) dupN(n int) error {
 	return nil
 }
 
+// SwapN swaps the nth element from stack with the top element
 func (s *stack) SwapN(n int) error {
 	if len(s.data) < n {
 		return fmt.Errorf("stack underflow")

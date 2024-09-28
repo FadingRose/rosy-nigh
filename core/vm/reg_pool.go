@@ -127,7 +127,6 @@ func (rp *RegPool) lookup(pc uint64, depth uint64) uint64 {
 }
 
 // TODO: Implement Rebuild, it will rebuild the regkeylist to a Tree structure.
-// TEST: RegPool Verification
 func (rp *RegPool) rebuild() {
 	log.Debug(fmt.Sprintf("Rebuilding reg pool, len: %d", len(rp.regkeyList)))
 	st := newSymbolicStack()
