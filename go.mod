@@ -1,14 +1,17 @@
 module fadingrose/rosy-nigh
 
-go 1.21.4
+go 1.22
+
+toolchain go1.22.5
 
 require (
 	github.com/aclements/go-z3 v0.0.0-20220809013456-4675d5f90ca5
 	github.com/consensys/gnark-crypto v0.12.1
 	github.com/ethereum/go-ethereum v1.14.8
-	github.com/fatih/color v1.16.0
 	github.com/holiman/uint256 v1.3.1
+	github.com/k0kubun/go-ansi v0.0.0-20180517002512-3bf9e2903213
 	github.com/pelletier/go-toml v1.9.5
+	github.com/schollz/progressbar/v3 v3.16.0
 	github.com/urfave/cli/v2 v2.25.7
 	golang.org/x/crypto v0.22.0
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa
@@ -45,10 +48,10 @@ require (
 	github.com/klauspost/compress v1.16.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.13 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
+	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -56,7 +59,7 @@ require (
 	github.com/prometheus/client_model v0.2.1-0.20210607210712-147c58e9608a // indirect
 	github.com/prometheus/common v0.32.1 // indirect
 	github.com/prometheus/procfs v0.7.3 // indirect
-	github.com/rivo/uniseg v0.2.0 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
@@ -66,7 +69,8 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	golang.org/x/sync v0.7.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
+	golang.org/x/sys v0.25.0 // indirect
+	golang.org/x/term v0.24.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect

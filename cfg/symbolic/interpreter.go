@@ -24,19 +24,29 @@ func NewSymbolicInterpreter(Lut map[uint64]*Operation) *SymbolicInterpreter {
 	}
 }
 
-func (si *SymbolicInterpreter) Run(stmts []uint64) (dest *uint256.Int, halt bool, err error) {
+func (si *SymbolicInterpreter) Run(stmts []uint64, destStack *destinationStack) (dest *uint256.Int, halt bool, err error) {
 	st := newStack()
+
+	// from si.lut, construct a function level local lut for concurrent access
+	localLut := make(map[uint64]*operation)
+	for k, v := range si.lut {
+		localLut[k] = v.valueCopy()
+	}
+
 	for i, pc := range stmts {
 		if si.lut[pc] == nil {
 			return nil, false, fmt.Errorf("lut[%d] is nil", pc)
 		}
 		var (
-			opera = si.lut[pc]
+			opera = localLut[pc]
 			op    = opera.op
 		)
 
 		opera.val = opera.solve()
 
+		if op == vm.PUSH2 {
+			destStack.SafePush(opera.val.Uint64())
+		}
 		// params := make([]*operation, 0)
 
 		// // HACK: track 2076
@@ -83,17 +93,25 @@ func (si *SymbolicInterpreter) Run(stmts []uint64) (dest *uint256.Int, halt bool
 			if op == vm.JUMPI {
 				dest = opera.params[1].val
 			}
+
 			if op == vm.JUMP {
 				dest = opera.params[0].val
 			}
 
 			if dest == nil {
 				log.Warn(fmt.Sprintf("resolve failed at %s\n", opera.expand(0)))
-				return nil, false, fmt.Errorf("end of statements unreachable")
+				// return nil, false, fmt.Errorf("end of statements unreachable")
+				return nil, false, nil
 			}
 
-			// log.Warn(fmt.Sprintf("resolve success at %s\n", opera.expand(0)))
+			log.Warn(fmt.Sprintf("resolve success at %sdest st: %s\n", opera.expand(0), destStack.String()))
 			return dest, false, nil
+		}
+
+		if op == vm.JUMP || op == vm.JUMPI {
+			if _, ok := destStack.Pop(); !ok {
+				log.Debug(fmt.Sprintf("dest stack underflow at %d %s", pc, op.String()))
+			}
 		}
 
 		if op == vm.JUMP || op == vm.JUMPI || op.IsDup() || op.IsSwap() {

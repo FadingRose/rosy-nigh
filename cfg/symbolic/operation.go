@@ -62,6 +62,18 @@ func (o *operation) dup() *operation {
 	}
 }
 
+func (o *operation) valueCopy() *operation {
+	return &operation{
+		paramSize:    o.paramSize,
+		pushbackSize: o.pushbackSize,
+		op:           o.op,
+		pc:           o.pc,
+		val:          uint256.NewInt(uint64(0)).Set(o.val),
+		cp:           nil,
+		exec:         o.exec,
+	}
+}
+
 func (o *operation) solve() *uint256.Int {
 	if len(o.params) != o.paramSize {
 		return nil

@@ -20,6 +20,7 @@ type CFG struct {
 
 	blockMap        map[uint64]*Block
 	directSuccessor map[uint64]*Block
+	destMap         map[uint64]*Block
 
 	slotCoverage SlotCoverage
 
@@ -33,15 +34,21 @@ func NewCFG(bytecode []byte) *CFG {
 		sstoreTotal = 0
 		sloadTotal  = 0
 	)
+
 	cur := newBlock(0)
 	cur.Selector = true // start collect statements from root
+	cur.Discover = true
+	cur.Live = true
 
-	blockmap := make(map[uint64]*Block)
-	directSuccessor := make(map[uint64]*Block)
+	var (
+		blockmap        = make(map[uint64]*Block)
+		directSuccessor = make(map[uint64]*Block)
+		destMap         = make(map[uint64]*Block)
+	)
+
 	it := asm.NewInstructionIterator(bytecode)
 	nxtit := asm.NewInstructionIterator(bytecode)
 	nxtit.Next()
-
 	for it.Next() {
 		cur.appendStmt(&instruction{
 			pc:         it.PC(),
@@ -59,24 +66,38 @@ func NewCFG(bytecode []byte) *CFG {
 		if it.Op() == vm.SLOAD {
 			sloadTotal++
 		}
+
 		nxtit.Next()
+
 		if isLeadingEnd(it.Op(), nxtit.Op()) {
 			idx := cur.Index + 1
 			blocks = append(blocks, cur)
 			cur = newBlock(idx)
 		}
 
-		blockmap[it.PC()] = cur
+		// blockmap[it.PC()] = cur
+		if it.Op() == vm.JUMPDEST {
+			if len(cur.Stmt) == 0 {
+				log.Debug("dest at %d is empty", "empty JUMPDEST", it.PC())
+			}
+			destMap[it.PC()] = cur
+		}
 	}
 
 	for i := 0; i < len(blocks)-1; i++ {
 		ls := blocks[i].LastStmt()
-		if ls.op != vm.JUMPI {
+		// HACK: only end with JUMP has no direct successor 267/270
+		if ls.op == vm.JUMP {
 			continue
 		}
 		// HACK:
-		fmt.Printf("ls.pc %d -> ds.pc %d\n", ls.pc, blocks[i+1].FirstStmt().pc)
+		// fmt.Printf("ls.pc %d -> ds.pc %d\n", ls.pc, blocks[i+1].FirstStmt().pc)
 		directSuccessor[ls.pc] = blocks[i+1]
+	}
+
+	// FIX: if a block with only one statement, the index will be incorrect pointed to the next block
+	for _, b := range blocks {
+		blockmap[b.FirstStmt().PC()] = b
 	}
 
 	return &CFG{
@@ -85,6 +106,8 @@ func NewCFG(bytecode []byte) *CFG {
 
 		blockMap:        blockmap,
 		directSuccessor: directSuccessor,
+		destMap:         destMap,
+
 		slotCoverage: SlotCoverage{
 			0, sstoreTotal, 0, sloadTotal,
 		},
@@ -117,7 +140,17 @@ func (cfg *CFG) CoverageString() string {
 	coveredBranch, totalBranch := cfg.branchCoverage()
 	coveredStmt, totalStmt := cfg.StatementCoverage()
 	slotCoverage := cfg.SlotCoverage()
-	return fmt.Sprintf("Branch coverage: %d/%d  Statement Coverage: %d/%d\n SlotCoverage: R(%d/%d) W(%d/%d)\n", coveredBranch, totalBranch, coveredStmt, totalStmt, slotCoverage.SLOADCover, slotCoverage.SLOADTotal, slotCoverage.SSTORECover, slotCoverage.SSTORETotal)
+	discovered, totalDiscover := cfg.discoverCoverage()
+	return fmt.Sprintf(
+		"Branch coverage: %d/%d  Statement Coverage: %d/%d\n SlotCoverage: R(%d/%d) W(%d/%d)\n Discover Block Coverate(static CFG): %d/%d\n",
+		coveredBranch, totalBranch,
+		coveredStmt, totalStmt,
+		slotCoverage.SLOADCover,
+		slotCoverage.SLOADTotal,
+		slotCoverage.SSTORECover,
+		slotCoverage.SSTORETotal,
+		discovered, totalDiscover,
+	)
 }
 
 // Update updates the CFG with the given list of register keys, then returns slot access list.
@@ -216,6 +249,22 @@ func (cfg *CFG) branchCoverage() (int, int) {
 			branchCovered, branchTotal := stmt.BranchCoverage()
 			covered += branchCovered
 			total += branchTotal
+		}
+	}
+	return covered, total
+}
+
+func (cfg *CFG) discoverCoverage() (int, int) {
+	var (
+		covered = 0
+		total   = 0
+	)
+	for _, block := range cfg.Blocks {
+		total++
+		if block.Discover {
+			covered++
+		} else {
+			fmt.Printf(" WARN: Dead Code at %s\n", block.String())
 		}
 	}
 	return covered, total
@@ -395,12 +444,12 @@ func (cfg *CFG) SymbolicResolve() {
 		mu:         sync.Mutex{},
 		pathHashes: make(map[uint64]struct{}),
 		index:      int32(0),
-		maxdepth:   len(cfg.Blocks) + 1,
+		maxdepth:   len(cfg.Blocks) * 2,
+		twice:      make(map[uint64]struct{}),
 	}
 
 	var wg sync.WaitGroup
 	workerCount := runtime.GOMAXPROCS(0)
-	// workerCount := 1
 
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
@@ -428,7 +477,10 @@ func (cfg *CFG) SymbolicResolve() {
 					continue
 				}
 
-				dest, halt, err := inter.Run(stmts)
+				// destnation stack
+				destStack := symbolic.NewDestinationStack(cfg.isValidJumpDestination)
+
+				dest, halt, err := inter.Run(stmts, destStack)
 				if err != nil {
 					continue
 				}
@@ -438,21 +490,80 @@ func (cfg *CFG) SymbolicResolve() {
 					continue
 				}
 
+				var destBlock *Block
 				if dest != nil {
-					if destBlock := cfg.blockMap[dest.Uint64()]; destBlock != nil {
-						destBlock.Discovered()
-						np := append(curPath, destBlock.FirstStmt().PC())
-						// fmt.Printf("cur: %v dt: %v\n", curPath, np)
-						sp.append(np)
+					if !cfg.isValidJumpDestination(dest.Uint64()) {
+						log.Debug(fmt.Sprintf("invalid jump destination from resolved: %d", dest.Uint64()))
+						dest = nil
+					} else {
+						if destBlock = cfg.blockMap[dest.Uint64()]; destBlock != nil {
+							destBlock.Discovered()
+							np := append(curPath, destBlock.FirstStmt().PC())
+							// fmt.Printf("cur: %v dt: %v\n", curPath, np)
+							err := sp.append(np)
+							if err != nil {
+								log.Debug(fmt.Sprintf("append path(dest resolved) error: %s", err.Error()))
+							}
+						}
 					}
 				}
 
-				if ds := cfg.directSuccessor[stmts[len(stmts)-1]]; ds != nil {
-					ds.Discovered()
-					np := append(curPath, ds.FirstStmt().PC())
-					// fmt.Println("ds: ", np)
-					// fmt.Printf("cur: %v ds: %v\n", curPath, np)
-					sp.append(np)
+				// NOTE: if cur path end with JUMP, it has NO direct successor block 240/270
+				var ds *Block
+
+				laststmt := cfg.blockMap[curPath[len(curPath)-1]].LastStmt()
+				lastop := laststmt.Op()
+				if lastop != vm.JUMP {
+					if ds = cfg.directSuccessor[stmts[len(stmts)-1]]; ds != nil {
+						ds.Discovered()
+						np := append(curPath, ds.FirstStmt().PC())
+						// fmt.Println("ds: ", np)
+						// fmt.Printf("cur: %v ds: %v\n", curPath, np)
+						err := sp.append(np)
+						if err != nil {
+							log.Debug(fmt.Sprintf("append path(direct successor resolved) error: %s", err.Error()))
+						}
+					}
+				}
+
+				// HACK: assume we always select all the backups 240/270
+				//HACK: if destBlock == nil { we have a corner case, even we have a valid dest, it may not the ONLY one
+				//
+				// HACK: we only select the backup stack top coverage: 218/270
+				// if expected, ok := destStack.Pop(); ok {
+				// 	if eb := cfg.blockMap[expected]; eb != nil {
+				// 		fmt.Printf("destBlock is nil and ds is nil at %v,\n new path from dest stack: %s\n", curPath, destStack.String())
+				// 		eb.Discovered()
+				// 		np := append(curPath, eb.FirstStmt().PC())
+				// 		sp.append(np)
+				// 	}
+				// }
+
+				// HACK: we try to select all the backup destinations 240/270
+				appendAllBackups := func() {
+					for {
+						if expected, ok := destStack.Pop(); ok {
+							if eb := cfg.blockMap[expected]; eb != nil && !eb.Discover {
+								eb.Discovered()
+								tp := make([]uint64, len(curPath))
+								copy(tp, curPath)
+								np := append(tp, eb.FirstStmt().PC())
+								err := sp.append(np)
+								if err != nil {
+									log.Debug(fmt.Sprintf("append path(dest stack) error: %s", err.Error()))
+								}
+							}
+						} else {
+							break
+						}
+						// }
+					}
+				}
+
+				// WARN: this is a experiment condition
+				// cann't be proved why we ONLY need consider JUMP
+				if lastop == vm.JUMP || dest == nil {
+					appendAllBackups()
 				}
 
 			}
@@ -461,7 +572,7 @@ func (cfg *CFG) SymbolicResolve() {
 
 	wg.Wait()
 	fmt.Println(sp.string())
-	fmt.Println(cfg.String())
+	fmt.Println(cfg.CoverageString())
 	os.Exit(1)
 }
 
@@ -470,6 +581,10 @@ func (cfg *CFG) entryPathes() [][]uint64 {
 		entries [][]uint64
 		prefix  []uint64
 	)
+
+	// HACK: return [][]uint64{{0}} // 240/270 -> 257/270
+
+	return [][]uint64{{0}}
 
 	destFromSelector := func(b *Block) *uint256.Int {
 		for i, stmt := range b.Stmt {
@@ -509,4 +624,11 @@ func (cfg *CFG) entryPathes() [][]uint64 {
 	}
 
 	return entries
+}
+
+func (cfg *CFG) isValidJumpDestination(dest uint64) bool {
+	if _, exists := cfg.destMap[dest]; exists {
+		return true
+	}
+	return false
 }

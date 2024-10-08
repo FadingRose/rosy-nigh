@@ -81,6 +81,8 @@
 ## Symbolic CFG Solver
 
 
+## Block with no JUMPDEST and JUMPI
+
 (discover)Block 213:
         0x17e1(6113) POP  
         0x17e2(6114) CALLER  
@@ -98,3 +100,22 @@
         0x1814(6164) ISZERO  
         0x1815(6165) PUSH2 0x1823 
         0x1818(6168) JUMPI  
+
+## Dialing JumpDest
+
+(discover)Block 215:
+        0x1819(6169) POP  
+        0x181a(6170) PUSH2 0x1822 
+        0x181d(6173) DUP3  
+        0x181e(6174) PUSH2 0x19b1 
+        0x1821(6177) JUMP  
+
+Block 216:
+0x1822(6178) JUMPDEST  
+
+(discover)Block 217:
+        0x1823(6179) JUMPDEST  
+        0x1824(6180) ISZERO  
+        0x1825(6181) PUSH2 0x194a 
+        0x1828(6184) JUMPI  
+
